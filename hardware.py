@@ -225,60 +225,12 @@ class HardwareComponent:
         x = xreload.xreload(mod)
         print("Reloading from code", mod, x)
 
-    def New_UI(self):
-        scroll_area = self.settings.New_UI(style="scroll_form")
-        for n, func in self.operations.items():
-            btn = QtWidgets.QPushButton(n)
-            btn.clicked.connect(func)
-            scroll_area.widget().layout().addRow(btn)
-        read_from_hardware_button = QtWidgets.QPushButton("Read From Hardware")
-        read_from_hardware_button.clicked.connect(self.read_from_hardware)
-        scroll_area.widget().layout().addRow(read_from_hardware_button)
-        return scroll_area
+    def New_UI(self, include=None, exclude=None, style="scroll_form", exclude_ops=None):
+        # maybe not needed as new_control_widgets does effectively the same
+        return self.settings.New_UI(include, exclude, style, self.operations)
 
     def new_control_widgets(self):
-
-        self.controls_groupBox = QtWidgets.QGroupBox(self.name)
-        self.controls_formLayout = QtWidgets.QFormLayout()
-        self.controls_groupBox.setLayout(self.controls_formLayout)
-
-        # self.connect_hardware_checkBox = QtWidgets.QCheckBox("Connect to Hardware")
-        # self.controls_formLayout.addRow("Connect", self.connect_hardware_checkBox)
-        # self.connect_hardware_checkBox.stateChanged.connect(self.enable_connection)
-
-        self.control_widgets = OrderedDict()
-        for lqname, lq in self.settings.as_dict().items():
-            #: :type lq: LoggedQuantity
-            if lq.choices is not None:
-                widget = QtWidgets.QComboBox()
-            elif lq.dtype in [int, float]:
-                if lq.si:
-                    widget = pg.SpinBox()
-                else:
-                    widget = QtWidgets.QDoubleSpinBox()
-            elif lq.dtype in [bool]:
-                widget = QtWidgets.QCheckBox()
-            elif lq.dtype in [str]:
-                widget = QtWidgets.QLineEdit()
-            lq.connect_to_widget(widget)
-
-            # Add to formlayout
-            self.controls_formLayout.addRow(lqname, widget)
-            self.control_widgets[lqname] = widget
-
-        self.op_buttons = OrderedDict()
-        for op_name, op_func in self.operations.items():
-            op_button = QtWidgets.QPushButton(op_name)
-            op_button.clicked.connect(lambda checked, f=op_func: f())
-            self.controls_formLayout.addRow(op_name, op_button)
-
-        self.read_from_hardware_button = QtWidgets.QPushButton("Read From Hardware")
-        self.read_from_hardware_button.clicked.connect(self.read_from_hardware)
-        self.controls_formLayout.addRow(
-            "Logged Quantities:", self.read_from_hardware_button
-        )
-
-        return self.controls_groupBox
+        return new_control_widgets(self.name, self.settings, self.operations)
 
     def setup(self):
         """
@@ -308,3 +260,33 @@ class HardwareQObject(QtCore.QObject):
     connection_succeeded = QtCore.Signal()
     connection_failed = QtCore.Signal()
 
+
+def new_control_widgets(name, settings: LQCollection, operations: dict):
+    controls_groupBox = QtWidgets.QGroupBox(name)
+    controls_formLayout = QtWidgets.QFormLayout()
+    controls_groupBox.setLayout(controls_formLayout)
+
+    # control_widgets = OrderedDict()
+    for lqname, lq in settings.as_dict().items():
+        if lq.choices is not None:
+            widget = QtWidgets.QComboBox()
+        elif lq.dtype in [int, float]:
+            if lq.si:
+                widget = pg.SpinBox()
+            else:
+                widget = QtWidgets.QDoubleSpinBox()
+        elif lq.dtype in [bool]:
+            widget = QtWidgets.QCheckBox()
+        elif lq.dtype in [str]:
+            widget = QtWidgets.QLineEdit()
+        lq.connect_to_widget(widget)
+
+        controls_formLayout.addRow(lqname, widget)
+        # control_widgets[lqname] = widget
+
+    for op_name, op_func in operations.items():
+        op_button = QtWidgets.QPushButton(op_name)
+        op_button.clicked.connect(lambda checked, f=op_func: f())
+        controls_formLayout.addRow(op_name, op_button)
+
+    return controls_groupBox

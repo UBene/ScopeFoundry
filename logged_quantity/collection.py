@@ -180,70 +180,70 @@ class LQCollection:
             self.vectors[name] = lq_vector
             return lq_vector
 
-    def New_UI(self, include=None, exclude=[], style="form"):
-        """create a default Qt Widget that contains
+    def iter(self, include=None, exclude=None):
+        if include is None:
+            include = self.as_dict().keys()
+        if exclude is None:
+            exclude = []
+        return ((x, self.get_lq(x)) for x in include if x not in exclude)
+
+    def New_UI(
+        self,
+        include=None,
+        exclude=None,
+        style="form",
+        operations=None,
+        exclude_operations=None,
+    ) -> QtWidgets.QWidget:
+        """
+        create a default Qt Widget that contains
         widgets for all settings in the LQCollection
         """
-
-        if include is None:
-            lqnames = self.as_dict().keys()
-        else:
-            lqnames = include
-
-        ui_widget = QtWidgets.QWidget()
+        additional = []
+        operations = {} if operations is None else operations
+        exclude_operations = {} if exclude_operations is None else exclude_operations
+        for label, func in operations.items():
+            if label in exclude_operations:
+                continue
+            btn = QtWidgets.QPushButton(label)
+            btn.clicked.connect(func)
+            additional.append((label, btn))
 
         if style == "form":
-            formLayout = QtWidgets.QFormLayout()
-            ui_widget.setLayout(formLayout)
-
-            for lqname in lqnames:
-                if lqname in exclude:
-                    continue
-                lq = self.get_lq(lqname)
-                #: :type lq: LoggedQuantity
-                widget = lq.new_default_widget()
-                # Add to formlayout
-                formLayout.addRow(lqname, widget)
-                # lq_tree_item = QtWidgets.QTreeWidgetItem(self.tree_item, [lqname, ""])
-                # self.tree_item.addChild(lq_tree_item)
-                # lq.hardware_tree_widget = widget
-                # tree.setItemWidget(lq_tree_item, 1, lq.hardware_tree_widget)
-                # self.control_widgets[lqname] = widget
+            ui_widget = QtWidgets.QWidget()
+            formLayout = QtWidgets.QFormLayout(ui_widget)
+            for label, lq in self.iter(include, exclude):
+                formLayout.addRow(label, lq.new_default_widget())
+            for label, btn in additional:
+                formLayout.addRow(label, btn)
+            return ui_widget
 
         elif style == "hbox":
-            hboxLayout = QtWidgets.QHBoxLayout()
-            ui_widget.setLayout(hboxLayout)
-
-            for lqname in lqnames:
-                if lqname in exclude:
-                    continue
-                lq = self.get_lq(lqname)
-                widget = lq.new_default_widget()
-
-                hboxLayout.addWidget(QtWidgets.QLabel(lqname))
-                hboxLayout.addWidget(widget)
+            ui_widget = QtWidgets.QWidget()
+            hboxLayout = QtWidgets.QHBoxLayout(ui_widget)
+            for label, lq in self.iter(include, exclude):
+                hboxLayout.addWidget(QtWidgets.QLabel(label))
+                hboxLayout.addWidget(lq.new_default_widget())
+            for label, btn in additional:
+                hboxLayout.addWidget(QtWidgets.QLabel(label))
+                hboxLayout.addWidget(btn)
+            return ui_widget
 
         elif style == "scroll_form":
+            ui_widget = QtWidgets.QWidget()
+            formLayout = QtWidgets.QFormLayout(ui_widget)
             scroll_area = QtWidgets.QScrollArea()
-            formLayout = QtWidgets.QFormLayout()
-            ui_widget.setLayout(formLayout)
             scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOn)
             scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
             scroll_area.setWidgetResizable(True)
             scroll_area.setWidget(ui_widget)
-
-            for lqname in lqnames:
-                if lqname in exclude:
-                    continue
-                lq = self.get_lq(lqname)
-                #: :type lq: LoggedQuantity
-                widget = lq.new_default_widget()
-                # Add to formlayout
-                formLayout.addRow(lqname, widget)
-
+            for label, lq in self.iter(include, exclude):
+                formLayout.addRow(label, lq.new_default_widget())
+            for label, btn in additional:
+                formLayout.addRow(label, btn)
             return scroll_area
 
-        return ui_widget
+        assert style in ("form", "hbox", "scroll_form")
 
     def add_widgets_to_subtree(self, tree_item):
         lq_tree_items = []
