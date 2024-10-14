@@ -116,7 +116,6 @@ class LoggedQuantity(QtCore.QObject):
                     self.qcolors.append(default_color)
 
         self.log = get_logger_from_class(self)
-        self.prev_vals = deque([], 3)
 
         if self.dtype == int:
             self.spinbox_decimals = 0
@@ -143,6 +142,7 @@ class LoggedQuantity(QtCore.QObject):
 
         self.protected = protected
 
+        self.prev_vals = deque([], 3)
         self.proposed_values = deque([], 7)
 
     def coerce_to_type(self, x):
@@ -390,7 +390,7 @@ class LoggedQuantity(QtCore.QObject):
         self.updated_value[argtype].connect(func, **kwargs)
         self.listeners.append(func)
 
-    def connect_to_widget(self, widget):
+    def connect_bidir_to_widget(self, widget):
         # DEPRECATED
         return self.connect_to_widget(widget)
 

@@ -1,24 +1,71 @@
-from ScopeFoundry import Measurement, BaseMicroscopeApp
-import numpy as np
-import pyqtgraph as pg
 import time
 
+import numpy as np
+import pyqtgraph as pg
+
+from ScopeFoundry import BaseMicroscopeApp, HardwareComponent, Measurement, new_tree
+
+
+class Hardware1(HardwareComponent):
+
+    name = "hardware1"
+
+    def setup(self):
+        self.settings.New("val1", initial=0.1)
+        self.settings.New("val2", str, initial="hello world")
+        self.settings.New("val3", str, choices=("Apple", "Bear", "Car"))
+
+    def connect(self):
+        print("connected to", self.name)
+
+    def disconnect(self):
+        print("disconnected from", self.name)
+
+
+class Hardware2(HardwareComponent):
+
+    name = "hardware2"
+
+    def setup(self):
+        self.settings.New("val1", initial=0.1)
+
+    def connect(self):
+        raise ValueError("simulate unsuccessfull connection")
+
+    def disconnect(self):
+        print("disconnected from", self.name)
+
+
+class Hardware3(HardwareComponent):
+
+    name = "hardware3"
+
+    def setup(self):
+        self.settings.New("val1", initial=0.1)
+
+    def connect(self):
+        print("connected to", self.name)
+
+    def disconnect(self):
+        raise ValueError("simulate unsuccessfull disconnection")
+
+
 class Measure1(Measurement):
-    
+
     name = 'measure1'
-    
+
     M = 5
 
     def setup(self):
         self.settings.New('nested_interrupt', dtype=bool, initial=True)
-    
+
     def run(self):
-        
+
         m2 = self.app.measurements['measure2']
-        
+
         self.current_data = [0]
         self.data = [None,]*self.M
-        
+
         # start M2
         for j in range(self.M):
             if self.interrupt_measurement_called:
@@ -28,14 +75,14 @@ class Measure1(Measurement):
             success = self.start_nested_measure_and_wait(m2, nested_interrupt=self.settings['nested_interrupt'], 
                                                polling_func=self.m2_polling, polling_time=0.5)
             if not success:
-                #self.interrupt()
+                # self.interrupt()
                 return
+
             self.data[j] = m2.data_array
-    
+
     def m2_polling(self):
         m2 = self.app.measurements['measure2']
         self.current_data = m2.data_array.copy()
-    
 
     def setup_figure(self):
         self.ui = self.plot = pg.PlotWidget()
@@ -46,9 +93,9 @@ class Measure1(Measurement):
             self.plot_lines.append(self.plot.plot())
 
     def update_display(self):
-        
+
         self.current_plotline.setData(self.current_data)
-        
+
         for j in range(self.M):
             if self.data[j] is None:
                 self.plot_lines[j].setData([0])
@@ -56,48 +103,52 @@ class Measure1(Measurement):
                 self.plot_lines[j].setData(self.data[j])
 
 class Measure2(Measurement):
-    
+
     name = 'measure2'
-    
+
     def setup(self):
-        
+
         self.settings.New('amplitude', dtype=float, initial=1.0)
         self.settings.New('run_crash_immediately', dtype=bool, initial=False)
         self.settings.New('run_crash_middle', dtype=bool, initial=False)
         self.settings.New('pre_run_crash', dtype=bool, initial=False)
         self.settings.New('post_run_crash', dtype=bool, initial=False)
-        
-        
+
     def setup_figure(self):
-        self.ui = self.plot = pg.PlotWidget()
-        
+
+        self.plot = pg.PlotWidget()
         self.plot_line = self.plot.plot()
-        
-    
+
+        self.ui = pg.QtWidgets.QWidget()
+        layout = pg.QtWidgets.QVBoxLayout(self.ui)
+        layout.addWidget(
+            new_tree((self, self.app.measurements["measure1"]), ("hello", "world"))
+        )
+        layout.addWidget(self.plot)
+
     def run(self):
-        
+
         if self.settings['run_crash_immediately']:
             raise IOError("run_crash_immediately")
-        
+
         N = 100
-        
+
         self.data_array = np.zeros(N)
-        
+
         for i in range(N):
-            #print(self.name, i, 'of', N)
+            # print(self.name, i, 'of', N)
             if self.interrupt_measurement_called:
                 print(self.name, 'interrupted at', i, 'of', N)
                 break            
             self.set_progress(100.0*i/N)
             self.data_array[i] = self.settings['amplitude']*np.sin(2*np.pi*i/N)
-            time.sleep(0.1)
+            time.sleep(0.05)
             if i>50 and self.settings['run_crash_middle']:
                 raise IOError("run_crash_middle")
 
-    
     def update_display(self):
         self.plot_line.setData(self.data_array)
-    
+
     def pre_run(self):
         print(self.name, 'pre_run fun!')
         time.sleep(0.5)
@@ -115,18 +166,21 @@ class Measure2(Measurement):
         print(self.name, 'post_run fun done!')
 
 class NestMeasureTestApp(BaseMicroscopeApp):
-    
+
     name = 'nested_measure_test'
-    
+
     def setup(self):
-        
+
+        self.add_hardware(Hardware1(self))
+        self.add_hardware(Hardware2(self))
+        self.add_hardware(Hardware3(self))
         self.add_measurement(Measure1(self))
         self.add_measurement(Measure2(self))
-        
-        
+
+
 if __name__ == '__main__':
     import sys
     app = NestMeasureTestApp(sys.argv)
-    
+    # app.qtapp.setStyle("fusion")
+
     app.exec_()
-    
