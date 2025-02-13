@@ -1,3 +1,13 @@
+ScopeFoundry 2.0.3 2025-02-28
+
+	* Features added:
+		- [documentation files] Measurement, HardwareComponent and BaseMicroscopeApp get links to respective documentation files placed in designated folders. If designated folder does not exist it will be created. Links are shown on right click in the tree and "Help" menu in the app.
+	
+	* Fixes:
+		- pyqtdarktheme when dark_mode = True is specified in initializer of an app.
+		- ScopeFoundry.tools.new_app for Linux. Thanks for M. Gamba for reporting this bug.
+
+
 ScopeFoundry 2.0.2 2025-02-14
 
 	* Features added:
