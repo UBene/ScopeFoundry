@@ -113,21 +113,13 @@ analyze_with_ipynb will generate a convinience functions to load data with pytho
 For ScopeFoundry core developers
 ---------------
 
-```sh
-conda create -n scopefoundry python=3.12
-```
-```sh
-conda activate scopefoundry
-```
-```sh
-conda install numpy qtpy h5py pyqtgraph qtconsole
-```
-```sh
-pip install pyqt6
-```
+Same steps as above and additionally
 
+1. Installation as above (although `scopefoundry` does not need to be pip install-ed)
+2. fork on [github](https://github.com/ScopeFoundry/ScopeFoundry) and pull it into 
+3. `your_project_folder` (see folder structure above).
 
-fork on [github](https://github.com/ScopeFoundry/ScopeFoundry) and pull it into `your_project_folder` (see folder structure above).
+Additions to ScopeFoundry are welcome, please create a Pull Request on GitHub.
 
 
 Maintainer
