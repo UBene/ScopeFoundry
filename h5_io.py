@@ -1,11 +1,10 @@
 import functools
-import time
-from datetime import datetime
 from pathlib import Path
 
 import h5py
 
-from .cb32_uuid import cb32_uuid
+from ScopeFoundry.dataset_metadata import new_dataset_metadata
+
 
 """
 recommended HDF5 file format for ScopeFoundry
@@ -54,54 +53,42 @@ other thoughts:
 """
 
 
-def h5_base_file(app, fname=None, measurement=None):
-    unique_id, u = cb32_uuid()  # persistent identifier for dataset
-    t0 = time.time()
+def h5_base_file(app, fname=None, measurement=None, dataset_metadata=None):
 
-    if fname is None and measurement is not None:
-        f = app.settings["data_fname_format"].format(
-            app=app,
-            measurement=measurement,
-            timestamp=datetime.fromtimestamp(t0),
-            unique_id=unique_id,
-            unique_id_short=unique_id[0:13],
-            ext="h5",
-        )
-        fname = Path(app.settings["save_dir"]) / f
-    elif fname is None:
-        fname = (
-            Path(app.settings["save_dir"])
-            / f"{datetime.fromtimestamp(t0):%y%m%d_%H%M%S}.h5"
-        )
+    if dataset_metadata is None:
+        dataset_metadata = new_dataset_metadata(measurement, fname)
 
-    h5_file = h5py.File(fname, "a")
+    h5_file = h5py.File(dataset_metadata.h5_file_path, "a")
     root = h5_file["/"]
-    root.attrs["ScopeFoundry_version"] = 160
-    root.attrs["time_id"] = int(t0)
-    root.attrs["unique_id"] = unique_id
-    root.attrs["uuid"] = str(u)
+    root.attrs["ScopeFoundry_version"] = 203
+    root.attrs["time_id"] = int(dataset_metadata.t0)
+    root.attrs["unique_id"] = dataset_metadata.unique_id
+    root.attrs["uuid"] = str(dataset_metadata.u)
 
     h5_save_app_lq(app, root)
     h5_save_hardware_lq(app, root)
     return h5_file
 
+
 def h5_save_app_lq(app, h5group):
-    h5_app_group = h5group.create_group('app/')
-    h5_app_group.attrs['name'] = app.name
-    h5_app_group.attrs['ScopeFoundry_type'] = "App"
-    settings_group = h5_app_group.create_group('settings')
+    h5_app_group = h5group.create_group("app/")
+    h5_app_group.attrs["name"] = app.name
+    h5_app_group.attrs["ScopeFoundry_type"] = "App"
+    settings_group = h5_app_group.create_group("settings")
     h5_save_lqcoll_to_attrs(app.settings, settings_group)
 
+
 def h5_save_hardware_lq(app, h5group):
-    h5_hardware_group = h5group.create_group('hardware/')
-    h5_hardware_group.attrs['ScopeFoundry_type'] = "HardwareList"
+    h5_hardware_group = h5group.create_group("hardware/")
+    h5_hardware_group.attrs["ScopeFoundry_type"] = "HardwareList"
     for hc_name, hc in app.hardware.items():
         h5_hc_group = h5_hardware_group.create_group(hc_name)
-        h5_hc_group.attrs['name'] = hc.name
-        h5_hc_group.attrs['ScopeFoundry_type'] = "Hardware"
+        h5_hc_group.attrs["name"] = hc.name
+        h5_hc_group.attrs["ScopeFoundry_type"] = "Hardware"
         h5_hc_settings_group = h5_hc_group.create_group("settings")
         h5_save_lqcoll_to_attrs(hc.settings, h5_hc_settings_group)
     return h5_hardware_group
+
 
 def h5_save_lqcoll_to_attrs(settings, h5group):
     """

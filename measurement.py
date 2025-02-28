@@ -3,7 +3,6 @@ Created on Tue Apr  1 09:25:48 2014
 @author: esbarnard
 """
 
-import json
 import sys
 import threading
 import time
@@ -25,6 +24,7 @@ from .helper_funcs import (
 )
 from .logged_quantity import LQCollection
 from .operations import Operations
+from .dataset_metadata import new_dataset_metadata
 
 
 class MeasurementQThread(QtCore.QThread):
@@ -121,7 +121,6 @@ class Measurement:
 
         if hasattr(self, "ui_filename"):
             self.load_ui()
-
         self.setup()
 
     def setup(self):
@@ -591,6 +590,11 @@ class Measurement:
             child_dir = Path(module.__file__).parent
 
         return child_dir / f"{module.__file__.strip('.py')}_docs"
+
+    def new_dataset_metadata(self, fname=None):
+        """Create a new dataset info. Use dataset_metadata to save data in multiple forms (h5, csv, png with persistent indentifyer)"""
+        self.dataset_metadata = new_dataset_metadata(measurement=self, fname=fname)
+        return self.dataset_metadata
 
 
 class MeasurementQObject(QtCore.QObject):
