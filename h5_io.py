@@ -307,15 +307,16 @@ def load_settings(fname):
     visit_func = functools.partial(_settings_visitfunc, settings=settings)
 
     with h5py.File(fname) as file:
-        file.visititems(visit_func)    
-
+        file.visititems(visit_func)
+        for key, val in file.attrs.items():
+            settings[key] = val
     return settings
 
 
 def _settings_visitfunc(name, node, settings):
     if not name.endswith("settings"):
         return
-    
+
     for key, val in node.attrs.items():
         lq_path = f"{name.replace('settings', key)}"
         settings[lq_path] = val
