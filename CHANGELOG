@@ -1,7 +1,9 @@
-ScopeFoundry 2.0.3 2025-02-28
+ScopeFoundry 2.1.0 2025-03-14
 
 	* Features added:
 		- [documentation files] Measurement, HardwareComponent and BaseMicroscopeApp get links to respective documentation files placed in designated folders. If designated folder does not exist it will be created. Links are shown on right click in the tree and "Help" menu in the app.
+		- [dataset_metadata] such as filename and uuid are now separated from h5_io such that they can be reused to save data in different file formats. 
+		- [measurement] Added convinience method to open new h5 file and to retrieve dataset_metadata.
 	
 	* Fixes:
 		- pyqtdarktheme when dark_mode = True is specified in initializer of an app.

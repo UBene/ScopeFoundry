@@ -37,7 +37,7 @@ pip install scopefoundry
 
 ###### From scratch
 
-1. Download and install [mininaconda]([https://www.anaconda.com/download/success) Python distribution 
+1. Download and install [mininaconda](https://www.anaconda.com/download/success) Python distribution 
 2. Create an environment with required dependencies. In `anaconda(3) prompt` run:
 	```sh
 	conda create -n scopefoundry python=3.13
