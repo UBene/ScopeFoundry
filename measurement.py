@@ -3,6 +3,7 @@ Created on Tue Apr  1 09:25:48 2014
 @author: esbarnard
 """
 
+import re
 import sys
 import threading
 import time
@@ -12,6 +13,7 @@ from typing import Callable
 from warnings import warn
 
 from qtpy import QtCore, QtGui, QtWidgets
+
 
 from .base_app import BaseMicroscopeApp
 from .dynamical_widgets.generic_widget import add_to_layout, new_widget
@@ -595,6 +597,23 @@ class Measurement:
         """Create a new dataset info. Use dataset_metadata to save data in multiple forms (h5, csv, png with persistent indentifyer)"""
         self.dataset_metadata = new_dataset_metadata(measurement=self, fname=fname)
         return self.dataset_metadata
+
+    def open_new_h5_file(self, dataset_metadata=None):
+        """returns the h5 group for the measurement"""
+        self.close_h5_file()
+
+        if dataset_metadata is None:
+            dataset_metadata = self.new_dataset_metadata()
+
+        from ScopeFoundry import h5_io
+
+        self.h5_file = h5_io.h5_base_file(self.app, dataset_metadata=dataset_metadata)
+        self.h5_meas_group = h5_io.h5_create_measurement_group(self, self.h5_file)
+        return self.h5_meas_group
+
+    def close_h5_file(self):
+        if hasattr(self, "h5_file") and self.h5_file.id is not None:
+            self.h5_file.close()
 
 
 class MeasurementQObject(QtCore.QObject):

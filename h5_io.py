@@ -90,7 +90,7 @@ def h5_save_hardware_lq(app, h5group):
     return h5_hardware_group
 
 
-def h5_save_lqcoll_to_attrs(settings, h5group):
+def h5_save_lqcoll_to_attrs(settings, h5group: h5py.Group):
     """
     take a LQCollection
     and create attributes inside h5group
@@ -99,10 +99,10 @@ def h5_save_lqcoll_to_attrs(settings, h5group):
     :param h5group:
     :return: None
     """
-    unit_group = h5group.create_group('units')
+    unit_group = h5group.create_group("units")
     # TODO decide if we should specify h5 attr data type based on LQ dtype
     for lqname, lq in settings.as_dict().items():
-        #print('h5_save_lqcoll_to_attrs', lqname, repr(lq.val))
+        # print('h5_save_lqcoll_to_attrs', lqname, repr(lq.val))
         try:
             h5group.attrs[lqname] = lq.val
         except:
@@ -111,46 +111,53 @@ def h5_save_lqcoll_to_attrs(settings, h5group):
             unit_group.attrs[lqname] = lq.unit
 
 
-def h5_create_measurement_group(measurement, h5group, group_name=None):
+def h5_create_measurement_group(measurement, h5group, group_name=None) -> h5py.Group:
     if group_name is None:
-        group_name = 'measurement/' + measurement.name
+        group_name = "measurement/" + measurement.name
     h5_meas_group = h5group.create_group(group_name)
     h5_save_measurement_settings(measurement, h5_meas_group)
     return h5_meas_group
 
+
 def h5_save_measurement_settings(measurement, h5_meas_group):
-    h5_meas_group.attrs['name'] = measurement.name
-    h5_meas_group.attrs['ScopeFoundry_type'] = "Measurement"
+    h5_meas_group.attrs["name"] = measurement.name
+    h5_meas_group.attrs["ScopeFoundry_type"] = "Measurement"
     settings_group = h5_meas_group.create_group("settings")
     h5_save_lqcoll_to_attrs(measurement.settings, settings_group)
 
 
-def h5_measurement_file(measurement,  fname=None):
-    """ Default way to create HDF5 file and fill with 
+def h5_measurement_file(measurement, fname=None):
+    """Default way to create HDF5 file and fill with
     metadata for measurement and hardware
-    
+
     filename of file is determined by app settings unless fname is specified
-    
+
     creates an h5 file with groups: /app, /hardware, /measurement/<measurement_name>
-    
+
     with all settings written to the file
-    
+
     returns Measurement H5 group where additional data objects can be added during the measurment
     """
-    h5f = h5_base_file(
-                    app=measurement.app,
-                    fname=fname,
-                    measurement=measurement)
+    h5f = h5_base_file(app=measurement.app, fname=fname, measurement=measurement)
     M = h5_create_measurement_group(measurement, h5group=h5f)
     return M
 
 
-def h5_create_emd_dataset(name, h5parent, shape=None, data = None, maxshape = None, 
-                          dim_arrays = None, dim_names= None, dim_units = None,  **kwargs):
+def h5_create_emd_dataset(
+    name,
+    h5parent,
+    shape=None,
+    data=None,
+    maxshape=None,
+    dim_arrays=None,
+    dim_names=None,
+    dim_units=None,
+    **kwargs,
+):
     """
     create an EMD dataset v0.2 inside h5parent
     returns an h5 group emd_grp
-    
+
     to access N-dim dataset:    emd_grp['data']
     to access a specific dimension array: emd_grp['dim1']
 
@@ -159,66 +166,72 @@ def h5_create_emd_dataset(name, h5parent, shape=None, data = None, maxshape = No
     * h5parent
         * name [emd_grp] (<--returned)
             - emd_group_type = 1
-            D data [shape = shape] 
+            D data [shape = shape]
             D dim1 [shape = shape[0]]
                 - name
                 - units
             ...
-            D dimN [shape = shape[-1]]      
+            D dimN [shape = shape[-1]]
 
     Parameters
     ----------
-    
-    h5parent : parent HDF5 group 
-    
+
+    h5parent : parent HDF5 group
+
     shape : Dataset shape of N dimensions.  Required if "data" isn't provided.
 
     data : Provide data to initialize the dataset.  If used, you can omit
             shape and dtype arguments.
-    
+
     Keyword Args:
-    
+
     dtype : Numpy dtype or string.  If omitted, dtype('f') will be used.
             Required if "data" isn't provided; otherwise, overrides data
             array's dtype.
-            
+
     dim_arrays : optional, a list of N dimension arrays
-    
-    dim_names : optional, a list of N strings naming the dataset dimensions 
-    
+
+    dim_names : optional, a list of N strings naming the dataset dimensions
+
     dim_units : optional, a list of N strings specifying units of dataset dimensions
-    
+
     Other keyword arguments follow from h5py.File.create_dataset
-    
+
     Returns
     -------
     emd_grp : h5 group containing dataset and dimension arrays, see hierarchy below
-    
+
     """
     # set the emd version tag at root of h5 file
-    h5parent.file['/'].attrs['version_major'] = 0
-    h5parent.file['/'].attrs['version_minor'] = 2
+    h5parent.file["/"].attrs["version_major"] = 0
+    h5parent.file["/"].attrs["version_minor"] = 2
 
     # create the EMD data group
     emd_grp = h5parent.create_group(name)
-    emd_grp.attrs['emd_group_type'] = 1
+    emd_grp.attrs["emd_group_type"] = 1
 
     if data is not None:
         shape = data.shape
 
     # data set where the N-dim data is stored
-    data_dset = emd_grp.create_dataset("data", shape=shape, maxshape=maxshape, data=data, **kwargs)
+    data_dset = emd_grp.create_dataset(
+        "data", shape=shape, maxshape=maxshape, data=data, **kwargs
+    )
 
-    if dim_arrays is not None: assert len(dim_arrays) == len(shape)
-    if dim_names  is not None: assert len(dim_names)  == len(shape)
-    if dim_units  is not None: assert len(dim_units)  == len(shape)
-    if maxshape   is not None: assert len(maxshape)   == len(shape)
+    if dim_arrays is not None:
+        assert len(dim_arrays) == len(shape)
+    if dim_names is not None:
+        assert len(dim_names) == len(shape)
+    if dim_units is not None:
+        assert len(dim_units) == len(shape)
+    if maxshape is not None:
+        assert len(maxshape) == len(shape)
 
     # Create the dimension array datasets
     for ii in range(len(shape)):
         if dim_arrays is not None:
             dim_array = dim_arrays[ii]
-            dim_dtype =  dim_array.dtype            
+            dim_dtype = dim_array.dtype
         else:
             dim_array = None
             dim_dtype = float
@@ -236,12 +249,16 @@ def h5_create_emd_dataset(name, h5parent, shape=None, data = None, maxshape = No
             dim_maxshape = None
 
         # create dimension array dataset
-        dim_dset = emd_grp.create_dataset(f"dim{ii+1}", shape=(shape[ii],), 
-                                           dtype=dim_dtype, data=dim_array, 
-                                           maxshape=dim_maxshape)
-        dim_dset.attrs['name'] = dim_name
+        dim_dset = emd_grp.create_dataset(
+            f"dim{ii+1}",
+            shape=(shape[ii],),
+            dtype=dim_dtype,
+            data=dim_array,
+            maxshape=dim_maxshape,
+        )
+        dim_dset.attrs["name"] = dim_name
         if dim_unit is not None:
-            dim_dset.attrs['unit'] = dim_unit
+            dim_dset.attrs["unit"] = dim_unit
 
     return emd_grp
 
@@ -249,11 +266,11 @@ def h5_create_emd_dataset(name, h5parent, shape=None, data = None, maxshape = No
 def create_extendable_h5_dataset(h5_group, name, shape, axis=0, dtype=None, **kwargs):
     """
     Create and return an empty HDF5 dataset of type *dtype* in h5_group that can store
-    an infinitely long log of along *axis* (defaults to axis=0). 
+    an infinitely long log of along *axis* (defaults to axis=0).
     Dataset will have an initial shape *shape* but can be extended along *axis*
-            
+
     creates reasonable defaults for chunksize
-    can be overridden with **kwargs that are sent directly to 
+    can be overridden with **kwargs that are sent directly to
     h5_group.create_dataset
     """
     maxshape = list(shape)
@@ -263,16 +280,14 @@ def create_extendable_h5_dataset(h5_group, name, shape, axis=0, dtype=None, **kw
         name=name,
         shape=shape,
         dtype=dtype,
-        #chunks=(1,),
+        # chunks=(1,),
         chunks=shape,
         maxshape=maxshape,
         compression=None,
-        #shuffle=True,
-        )
+        # shuffle=True,
+    )
     default_kwargs.update(kwargs)
-    h5_dataset =  h5_group.create_dataset(
-        **default_kwargs
-        )
+    h5_dataset = h5_group.create_dataset(**default_kwargs)
     return h5_dataset
 
 
@@ -281,18 +296,20 @@ def create_extendable_h5_like(h5_group, name, arr, axis=0, **kwargs):
     Create and return an empty HDF5 dataset in h5_group that can store
     an infinitely long log of along *axis* (defaults to axis=0). Dataset will be the same
     shape as *arr* but can be extended along *axis*
-            
+
     creates reasonable defaults for chunksize, and dtype,
-    can be overridden with **kwargs that are sent directly to 
+    can be overridden with **kwargs that are sent directly to
     h5_group.create_dataset
     """
     return create_extendable_h5_dataset(
-        h5_group, name, arr.shape, axis, arr.dtype, **kwargs)
+        h5_group, name, arr.shape, axis, arr.dtype, **kwargs
+    )
+
 
 def extend_h5_dataset_along_axis(ds, new_len, axis=0):
     newshape = list(ds.shape)
     newshape[axis] = new_len
-    ds.resize( newshape )    
+    ds.resize(newshape)
 
 
 def load_settings(fname):
