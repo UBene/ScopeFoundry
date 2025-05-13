@@ -7,6 +7,7 @@ from ScopeFoundry.tools.page import Page
 from ScopeFoundry.tools.pages.new_app import NewApp
 from ScopeFoundry.tools.pages.new_hardware import NewHardware
 from ScopeFoundry.tools.pages.new_measurement import NewMeasurement
+from ScopeFoundry.tools.pages.publish_hw import PublishHW
 from ScopeFoundry.tools.pages.welcome import WelcomePage
 
 ROOT = Path(__file__).parent.parent
@@ -49,6 +50,7 @@ def start_app(page="Welcome") -> None:
     window.add_page(NewApp())
     window.add_page(NewHardware())
     window.add_page(NewMeasurement())
+    window.add_page(PublishHW())
     window.show()
     window.show_page(page)
     sys.exit(app.exec_())
