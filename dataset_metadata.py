@@ -22,19 +22,27 @@ def new_dataset_metadata(measurement=None, fname: str = None) -> DatasetMetadata
     unique_id, u = cb32_uuid()  # persistent identifier for dataset
     t0 = time.time()
 
-    if fname is None and measurement is not None:
-        app = measurement.app
-        fname = app.settings["data_fname_format"].format(
-            app=app,
-            measurement=measurement,
-            timestamp=datetime.fromtimestamp(t0),
-            unique_id=unique_id,
-            unique_id_short=unique_id[0:13],
-            ext="h5",
-        )
-    elif fname is None:
-        fname = f"{datetime.fromtimestamp(t0):%y%m%d_%H%M%S}.h5"
+    if fname is None:
+        if measurement is None:
+            h5_file_path = Path.cwd() / f"{datetime.fromtimestamp(t0):%y%m%d_%H%M%S}.h5"
+
+        else:
+            app = measurement.app
+            fname = app.settings["data_fname_format"].format(
+                app=app,
+                measurement=measurement,
+                timestamp=datetime.fromtimestamp(t0),
+                unique_id=unique_id,
+                unique_id_short=unique_id[0:13],
+                ext="h5",
+            )
+            h5_file_path = Path(app.settings["save_dir"]) / fname
+
     else:
-        fname = Path(fname).with_suffix(".h5")
-    h5_file_path = Path(app.settings["save_dir"]) / fname
+        if measurement is None:
+            h5_file_path = Path(fname).with_suffix(".h5")
+        else:
+            app = measurement.app
+            h5_file_path = Path(app.settings["save_dir"]) / fname
+
     return DatasetMetadata(unique_id, u, t0, h5_file_path)
