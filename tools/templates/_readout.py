@@ -108,7 +108,7 @@ class $READOUT_CLASS_NAME(Measurement):
 
     #     from ScopeFoundry import h5_io
 
-    #     self.h5_file = h5_io.h5_base_file(self.app)
+    #     self.h5_file = h5_io.h5_base_file(self.app, measurement=self)
     #     self.h5_meas_group = h5_io.h5_create_measurement_group(self, self.h5_file)
 
     #     if data:
