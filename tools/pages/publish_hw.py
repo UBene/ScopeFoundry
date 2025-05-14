@@ -19,6 +19,19 @@ from ScopeFoundry.tools.page import Page
 from ScopeFoundry.tools.features.publish_hw import publish_hw
 
 
+def is_folder_in_path(folder_name: str, path: Path) -> bool:
+    return (path / folder_name).is_dir()
+
+
+def make_hw_location_guess():
+    root = Path.cwd()
+    if is_folder_in_path("ScopeFoundryHW", root.parent):
+        return str(root.parent / "ScopeFoundryHW")
+    elif is_folder_in_path("ScopeFoundryHW", root):
+        return str(root / "ScopeFoundryHW")
+    return str(root)
+
+
 class PublishHW(Page):
 
     name = "publish on gh"
@@ -26,10 +39,9 @@ class PublishHW(Page):
     def setup(self) -> None:
         self.name = "publish HW on GitHub"
 
-        Path.cwd()
         self.settings.new_file(
             "ScopeFoundryHW_dir",
-            initial=str(Path.cwd() / "ScopeFoundryHW"),
+            initial=make_hw_location_guess(),
             is_dir=True,
         )
         self.settings.New("gh_username", str, initial="ubene")
