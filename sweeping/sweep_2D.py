@@ -1,32 +1,31 @@
 import time
 from copy import copy
-from typing import List, Tuple
+from typing import Sequence, Tuple, Union
 
 import numpy as np
 import pyqtgraph as pg
 from qtpy import QtWidgets
 
-from ScopeFoundry import Measurement
+from ScopeFoundry import BaseMicroscopeApp, Measurement
 from ScopeFoundry.scanning.actuators import (
-    ACTUATOR_DEFINITION,
-    get_actuator_funcs,
+    ActuatorDefinitions,
     add_all_possible_actuators_and_parse_definitions,
+    get_actuator_funcs,
 )
-from .sweep_2D_modes import (
-    DIM_NUMS,
-    N_DIMS,
-    SCAN_MODES,
-    SCAN_MODES_DESCRIPTION,
-    mk_ranges_consistent,
-    mk_positions_gen,
-    mk_data_shape,
-    mk_indices_gen,
-)
+
 from .any_measurement_collector import AnyMeasurementCollector
 from .any_setting_collector import AnySettingCollector
 from .collector import Collector
 from .collector_ui_list import InteractiveCollectorList
 from .nd_scan_data import NDScanData
+from .sweep_2D_modes import (
+    SCAN_MODES,
+    SCAN_MODES_DESCRIPTION,
+    mk_data_shape,
+    mk_indices_gen,
+    mk_positions_gen,
+    mk_ranges_consistent,
+)
 from .utils import filtered_lq_paths, mk_new_dir
 
 
@@ -48,7 +47,9 @@ class Sweep2D(Measurement):
             print("set a collector repetitions to non-zero")
             return
 
-        actuators = [self.actuators_funcs[s[f"actuator_{i}"]] for i in DIM_NUMS]
+        actuators = [
+            self.actuators_funcs[s[f"actuator_{i}"]] for i in self.actuator_names
+        ]
 
         if not actuators:
             self.set_status("no actuators selected", "r")
@@ -84,7 +85,7 @@ class Sweep2D(Measurement):
             for (_, write), position in zip(actuators, positions):
                 write(position)
             time.sleep(s["collection_delay"])
-            read_positions = [read() for read, _ in actuators]
+            read_positions = tuple([read() for read, _ in actuators])
 
             base_indices = next(scan_iteration_indices)
 
@@ -116,13 +117,15 @@ class Sweep2D(Measurement):
             if self.interrupt_measurement_called:
                 break
 
+        self.post_scan()
+
         scan_data.close_h5()
 
         if s["res_in_new_dir"]:
             s["res_in_new_dir"] = self.pre_res_in_new_dir
             self.app.settings["save_dir"] = self.root
 
-        self.set_status(f"{self.name} finished", "y")
+        self.set_status(f"{self.name} finished", "g")
         print("finished - data collected:")
         for k, v in scan_data.data.items():
             print(k, np.array(v).shape)
@@ -168,15 +171,24 @@ class Sweep2D(Measurement):
         """
         collector.release(self, positions)
 
+    def post_scan(self):
+        """Optional override.
+        Gets called after data collection is finished - before file is closed.
+        """
+        pass
+
     def __init__(
         self,
-        app,
-        name=None,
-        collectors: List[Collector] = None,
-        actuators: List[ACTUATOR_DEFINITION] = None,
+        app: BaseMicroscopeApp,
+        name: Union[str, None] = None,
+        collectors: Sequence[Collector] = (),
+        actuators: Sequence[ActuatorDefinitions] = (),
+        actuator_names: Sequence[str] = "12",
     ):
         self.collectors = [copy(x) for x in collectors]
-        self.user_defined_actuators = actuators
+        self.user_defined_actuators = list(actuators)
+        self.actuator_names = actuator_names
+        self.ndim = len(actuator_names)
         super().__init__(app, name)
 
     def setup(self):
@@ -234,9 +246,9 @@ class Sweep2D(Measurement):
                 description="number of times data gets collected at each position",
             )
 
-        for i in DIM_NUMS:
+        for i in self.actuator_names:
             s.New(f"actuator_{i}", dtype=str, choices=["none"])
-            s.New_Range(f"range_{i}", initials=(1, 2, 2))
+            s.New_Range(f"range_{i}", True, True, initials=(1, 2, 2))
 
         self.add_operation("update widgets", self.update_widgets)
 
@@ -251,7 +263,7 @@ class Sweep2D(Measurement):
         )
         self.actuators_funcs = get_actuator_funcs(self.app, defs)
 
-        for i in DIM_NUMS:
+        for i in self.actuator_names:
             s.get_lq(f"actuator_{i}").change_choice_list(self.actuators_funcs.keys())
 
     def setup_figure(self):
@@ -264,12 +276,12 @@ class Sweep2D(Measurement):
         )
         h_layout = QtWidgets.QHBoxLayout(h_widget)
         h_layout.addWidget(self.mk_run_widget())
+        h_layout.addWidget(self.mk_scan_settings_widget())
         h_layout.addWidget(self.mk_collect_widget())
 
         self.ui = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(self.ui)
         layout.addWidget(h_widget)
-        layout.addWidget(self.mk_scan_settings_widget())
         layout.addWidget(s.get_lq("plot_option").new_default_widget())
         layout.addWidget(self.mk_graph_widget())
 
@@ -290,11 +302,11 @@ class Sweep2D(Measurement):
             return
 
         dset = np.array(self.scan_data.data[self.settings["plot_option"]]).mean(
-            axis=N_DIMS
+            axis=self.ndim
         )
-        dlen = np.prod(dset.shape[N_DIMS:])  # len of data
+        dlen = np.prod(dset.shape[self.ndim :])  # len of data
 
-        ddim = len(dset.shape[N_DIMS:])
+        ddim = len(dset.shape[self.ndim :])
 
         curr = self.index * dlen
 
@@ -338,6 +350,7 @@ class Sweep2D(Measurement):
             # "plot_option",
             "collection_delay",
             "res_in_new_dir",
+            "scan_mode",
         )
         vlayout.addWidget(self.settings.New_UI(include))
         vlayout.addWidget(self.operations.new_button("update widgets"))
@@ -346,15 +359,11 @@ class Sweep2D(Measurement):
 
     def mk_scan_settings_widget(self):
         h_layout = QtWidgets.QHBoxLayout()
-        w3 = self.settings.New_UI(("scan_mode",))
-        w3.layout().setSpacing(1)
-        h_layout.addWidget(w3)
-        for i in DIM_NUMS:
+        for i in self.actuator_names:
             r = self.settings.ranges[f"range_{i}"]
             w1 = r.New_UI()
-            w1.layout().insertRow(0, QtWidgets.QLabel(f"actuator_{i}"))
             w1.layout().insertRow(
-                1, self.settings.get_lq(f"actuator_{i}").new_default_widget()
+                0, self.settings.get_lq(f"actuator_{i}").new_default_widget()
             )
             w1.layout().setSpacing(1)
             h_layout.addWidget(w1)

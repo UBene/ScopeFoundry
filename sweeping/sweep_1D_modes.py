@@ -1,5 +1,3 @@
-N_DIMS = 1
-DIM_NUMS = "1"
 SCAN_MODES = ("NA",)
 SCAN_MODES_DESCRIPTION = """
 -
@@ -25,4 +23,3 @@ def mk_indices_gen(ar_1, mode="NA"):
 
 def mk_ranges_consistent(settings):
     return
-

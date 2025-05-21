@@ -1,5 +1,3 @@
-N_DIMS = 4
-DIM_NUMS = "1234"
 SCAN_MODES = ("co-move", "nested", "1,2_nested_3,4_co-move")
 SCAN_MODES_DESCRIPTION = """
 <p><i>co-move:</i> all actuators co-move
