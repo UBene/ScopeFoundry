@@ -8,7 +8,7 @@ import threading
 import time
 import traceback
 from pathlib import Path
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Union
 from warnings import warn
 
 from qtpy import QtCore, QtGui, QtWidgets
@@ -56,7 +56,7 @@ class Measurement:
 
     """
 
-    def __init__(self, app: BaseMicroscopeApp, name: str = None):
+    def __init__(self, app: BaseMicroscopeApp, name: Union[str, None] = None):
 
         self.q_object = MeasurementQObject(self)
         self.measurement_sucessfully_completed = (
@@ -124,6 +124,7 @@ class Measurement:
         if hasattr(self, "ui_filename"):
             self.load_ui()
         self.setup()
+        self.subwin = None  # will be set when the measurement is added to the app
 
     def setup(self):
         """Override this to set up logged quantities and gui connections
