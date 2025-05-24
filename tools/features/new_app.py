@@ -55,11 +55,11 @@ def new_app() -> str:
         """
 test installation by running:
     
-    python -m fancy_app
+    python fancy_app.py
 
 """
     )
-    return "python -m fancy_app"
+    return "python fancy_app.py"
 
 
 if __name__ == "__main__":
