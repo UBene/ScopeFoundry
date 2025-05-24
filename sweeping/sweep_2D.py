@@ -39,7 +39,7 @@ class Sweep2D(Measurement):
         s.get_lq("plot_option").change_choice_list([])
         self.display_ready = False
 
-        mk_ranges_consistent(s)
+        mk_ranges_consistent(s, self.actuator_names)
 
         collectors = self.collector_list_widget.get_collectors()
         if not collectors:

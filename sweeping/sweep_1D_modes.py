@@ -21,5 +21,5 @@ def mk_indices_gen(ar_1, mode="NA"):
             yield k,
 
 
-def mk_ranges_consistent(settings):
+def mk_ranges_consistent(settings, actuator_names=("1", "2", "3")):
     return

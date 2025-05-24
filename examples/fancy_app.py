@@ -62,9 +62,9 @@ class FancyApp(BaseMicroscopeApp):
 
         # self.add_measurement(PIDFeedbackControl(self))
 
-        # -------------------------------------------------------------------------------
+        # ## -------------------------------------------------------------------------------
         # ## SweepND are experimental and may be subjected to change
-        # from ScopeFoundry import Sweep1D, Sweep2D, Sweep4D
+        # from ScopeFoundry import Sweep1D, Sweep2D, Sweep3D, Sweep4D
 
         # from measurements.collectors import Noiser200Collector
 
@@ -72,9 +72,10 @@ class FancyApp(BaseMicroscopeApp):
 
         # self.add_measurement(Sweep1D(self, actuators=actuators, collectors=collectors))
         # self.add_measurement(Sweep2D(self, actuators=actuators, collectors=collectors))
+        # self.add_measurement(Sweep3D(self, actuators=actuators, collectors=collectors))
         # self.add_measurement(Sweep4D(self, actuators=actuators, collectors=collectors))
         # ## SweepND are experimental and may be subjected to change
-        # -------------------------------------------------------------------------------
+        # ## -------------------------------------------------------------------------------
 
 
 if __name__ == "__main__":

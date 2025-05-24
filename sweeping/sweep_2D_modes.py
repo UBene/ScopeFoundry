@@ -34,8 +34,13 @@ def mk_indices_gen(ar_1, ar_2, mode="nested"):
             yield 0, l
 
 
-def mk_ranges_consistent(settings):
+def mk_ranges_consistent(settings, actuator_names=("1", "2")):
     if settings["scan_mode"] == "co-move":
         print(settings["scan_mode"])
-        print("actuator 1 takes num steps from actuator 2:", settings[f"range_2_num"])
-        settings[f"range_1_num"] = settings["range_2_num"]
+        print(
+            f"actuator {actuator_names[0]} takes num steps from actuator {actuator_names[1]}:",
+            settings[f"range_{actuator_names[0]}_num"],
+        )
+        settings[f"range_{actuator_names[0]}_num"] = settings[
+            f"range_{actuator_names[1]}_num"
+        ]

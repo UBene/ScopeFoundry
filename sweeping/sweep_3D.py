@@ -9,29 +9,29 @@ from qtpy import QtWidgets
 from ScopeFoundry import BaseMicroscopeApp, Measurement
 from ScopeFoundry.scanning.actuators import (
     ActuatorDefinitions,
-    get_actuator_funcs,
     add_all_possible_actuators_and_parse_definitions,
+    get_actuator_funcs,
 )
 
-from .sweep_1D_modes import (
-    SCAN_MODES,
-    SCAN_MODES_DESCRIPTION,
-    mk_ranges_consistent,
-    mk_positions_gen,
-    mk_data_shape,
-    mk_indices_gen,
-)
 from .any_measurement_collector import AnyMeasurementCollector
 from .any_setting_collector import AnySettingCollector
 from .collector import Collector
 from .collector_ui_list import InteractiveCollectorList
 from .nd_scan_data import NDScanData
+from .sweep_3D_modes import (
+    SCAN_MODES,
+    SCAN_MODES_DESCRIPTION,
+    mk_data_shape,
+    mk_indices_gen,
+    mk_positions_gen,
+    mk_ranges_consistent,
+)
 from .utils import filtered_lq_paths, mk_new_dir
 
 
-class Sweep1D(Measurement):
+class Sweep3D(Measurement):
 
-    name = "sweep_1d"
+    name = "sweep_3d"
 
     def run(self):
         s = self.settings
@@ -42,7 +42,6 @@ class Sweep1D(Measurement):
         mk_ranges_consistent(s, self.actuator_names)
 
         collectors = self.collector_list_widget.get_collectors()
-        print(collectors)
         if not collectors:
             self.set_status("set a collector repetitions to non-zero", "r")
             print("set a collector repetitions to non-zero")
@@ -51,6 +50,11 @@ class Sweep1D(Measurement):
         actuators = [
             self.actuators_funcs[s[f"actuator_{i}"]] for i in self.actuator_names
         ]
+
+        if not actuators:
+            self.set_status("no actuators selected", "r")
+            print("no actuators selected")
+            return
 
         if "any_measurement" in (col.name for col in collectors):
             self.pre_res_in_new_dir = s["res_in_new_dir"]
@@ -66,6 +70,7 @@ class Sweep1D(Measurement):
             base_shape=mk_data_shape(*arrays, s["scan_mode"]),
             measurement=self,
         )
+        print(scan_data.base_shape)
 
         N = np.prod(scan_data.base_shape)
         self.index = 0
@@ -178,7 +183,7 @@ class Sweep1D(Measurement):
         name: Union[str, None] = None,
         collectors: Sequence[Collector] = (),
         actuators: Sequence[ActuatorDefinitions] = (),
-        actuator_names: Sequence[str] = "1",
+        actuator_names: Sequence[str] = "123",
     ):
         self.collectors = [copy(x) for x in collectors]
         self.user_defined_actuators = list(actuators)
@@ -191,7 +196,7 @@ class Sweep1D(Measurement):
         s.New(
             name="scan_mode",
             dtype=str,
-            initial="NA",
+            initial="co-move",
             choices=SCAN_MODES,
             description=SCAN_MODES_DESCRIPTION,
         )
@@ -254,8 +259,7 @@ class Sweep1D(Measurement):
         s.get_lq("any_setting").change_choice_list(filtered_lq_paths(self.app))
 
         defs = add_all_possible_actuators_and_parse_definitions(
-            actuator_definitions=self.user_defined_actuators,
-            app=self.app,
+            actuator_definitions=self.user_defined_actuators, app=self.app
         )
         self.actuators_funcs = get_actuator_funcs(self.app, defs)
 
@@ -321,7 +325,7 @@ class Sweep1D(Measurement):
                 )
         else:
             self.line.setData(dset)
-
+        #
         # elif ddim in (2, 3):
         #     self.img_item.setVisible(True)
         #     images = dset.reshape((-1,)+ dset.shape[4:])
@@ -346,6 +350,7 @@ class Sweep1D(Measurement):
             # "plot_option",
             "collection_delay",
             "res_in_new_dir",
+            "scan_mode",
         )
         vlayout.addWidget(self.settings.New_UI(include))
         vlayout.addWidget(self.operations.new_button("update widgets"))
@@ -354,16 +359,12 @@ class Sweep1D(Measurement):
 
     def mk_scan_settings_widget(self):
         h_layout = QtWidgets.QHBoxLayout()
-        # w3 = self.settings.New_UI(("scan_mode"))
-        # w3.layout().setSpacing(1)
-        # h_layout.addWidget(w3)
         for i in self.actuator_names:
             r = self.settings.ranges[f"range_{i}"]
             w1 = r.New_UI()
             w1.layout().insertRow(
                 0, self.settings.get_lq(f"actuator_{i}").new_default_widget()
             )
-            # w1.layout().insertRow(0, QtWidgets.QLabel(f"actuator_{i}"))
             w1.layout().setSpacing(1)
             h_layout.addWidget(w1)
 
@@ -374,10 +375,10 @@ class Sweep1D(Measurement):
 
     def mk_collect_widget(self):
 
-        widget = QtWidgets.QGroupBox(
+        collect_widget = QtWidgets.QGroupBox(
             title="choose the number of repetion for each detectors - drag and drop to change order"
         )
-        layout = QtWidgets.QVBoxLayout(widget)
+        layout = QtWidgets.QVBoxLayout(collect_widget)
 
         self.collector_list_widget = InteractiveCollectorList()
         for collector in self.collectors:
@@ -387,7 +388,7 @@ class Sweep1D(Measurement):
             self.collector_list_widget.add_item(collector)
 
         layout.addWidget(self.collector_list_widget)
-        return widget
+        return collect_widget
 
     def mk_graph_widget(self):
         graph_widget = pg.GraphicsLayoutWidget()
@@ -395,8 +396,7 @@ class Sweep1D(Measurement):
         self.axes.setLogMode(False, False)
         self.axes.showGrid(True, True)
         self.line = self.axes.plot()
-        # self.img_axes = graph_widget.addPlot(title=self.name)
         # self.img_item = pg.ImageItem()
         # self.img_item.setVisible(False)
-        # self.img_axes.addItem(self.img_item)
+        # self.axes.addItem(self.img_item)
         return graph_widget
