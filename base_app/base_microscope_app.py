@@ -388,6 +388,11 @@ class BaseMicroscopeApp(BaseApp):
 
         measure.setup_figure()
         if not hasattr(measure, "ui"):
+            ui: QtWidgets.QWidget = measure.ui
+            ui.setSizePolicy(
+                QtWidgets.QSizePolicy.Policy.MinimumExpanding,
+                QtWidgets.QSizePolicy.Policy.MinimumExpanding,
+            )
             self._loaded_measure_uis[measure.name] = None
             for btn in measure._show_btns:
                 btn.setVisible(False)
