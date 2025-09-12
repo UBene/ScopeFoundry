@@ -1,26 +1,55 @@
 import numpy as np
 import pyqtgraph as pg
-from qtpy import QtCore
+from qtpy import QtCore, QtWidgets
 
 from .sweep_2D import Sweep2D
+import h5py
 
 
 class Map2D(Sweep2D):
 
     name = "map_2d"
 
+    def __init__(
+        self,
+        app,
+        name=None,
+        collectors=(),
+        actuators=(),
+        actuator_names="12",
+        range_n_intervals=(1, 1),
+        n_read_any_settings=2,
+        n_any_measurements=2,
+        invert_h=False,
+        invert_v=False,
+    ):
+        super().__init__(
+            app,
+            name,
+            collectors,
+            actuators,
+            actuator_names,
+            range_n_intervals,
+            n_read_any_settings,
+            n_any_measurements,
+        )
+        self.invert_h = invert_h
+        self.invert_v = invert_v
+
     def setup(self):
         self.img_items = []
         ans = super().setup()
         self.add_operation("clear_previous_scans", self.clear_previous_scans)
+        self.add_operation("load h5 image", self.load_img_from_h5)
         self.settings["scan_mode"] = "nested"
-        return ans
 
     def setup_figure(self):
         super().setup_figure()
         r1, r2 = self.get_ranges()
         r1.add_listener(self.connect_pos_widgets)
         r2.add_listener(self.connect_pos_widgets)
+        self.axes.getViewBox().invertX(self.invert_h)
+        self.axes.getViewBox().invertY(self.invert_v)
 
     def new_img_item(self):
         """Create a new image item and add it to the plot."""
@@ -29,6 +58,38 @@ class Map2D(Sweep2D):
         self.axes.addItem(img_item)
         self.hist_lut.setImageItem(img_item)
         return img_item
+
+    def load_img_from_h5(self, fname=None):
+
+        if fname is None:
+            fname, _ = QtWidgets.QFileDialog.getOpenFileName(
+                parent=None,
+                caption=f"Open File",
+                filter=";;".join(["All Files (*)"]),
+            )
+
+        with h5py.File(fname, "r") as file:
+            m = file[f"measurement/{self.name}"]
+            print(m.keys())
+            dset_names = list(m.keys())
+
+        dlg = ComboSelectDialog(dset_names)
+        if not dlg.exec_():
+            return
+
+        selected_dset = dlg.get_value()
+        with h5py.File(fname, "r") as file:
+            m = file[f"measurement/{self.name}"]
+            imshow_extent = m["imshow_extent"][:]
+            dset = m[selected_dset][:]
+
+        x0, x1, y0, y1 = imshow_extent
+        rect = QtCore.QRectF(x0, y0, x1 - x0, (y1 - y0))
+
+        img_item = self.new_img_item()
+        img = dset.mean(axis=tuple(np.arange(len(dset.shape))[2:]))
+
+        img_item.setImage(img, rect=rect)
 
     def pre_run(self):
         self.new_img_item()
@@ -180,7 +241,25 @@ class Map2D(Sweep2D):
         f1(xc)
         f2(yc)
 
-
     def new_pt_pos(self, x, y):
         """override this method to handle new point position"""
         print("new_pt_pos", x, y)
+
+
+class ComboSelectDialog(QtWidgets.QDialog):
+    def __init__(self, items, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Data")
+        self.layout = QtWidgets.QVBoxLayout(self)
+
+        self.combo = QtWidgets.QComboBox(self)
+        self.combo.addItems(items)
+        self.layout.addWidget(self.combo)
+
+        self.select_btn = QtWidgets.QPushButton("Select Data", self)
+        self.layout.addWidget(self.select_btn)
+
+        self.select_btn.clicked.connect(self.accept)
+
+    def get_value(self):
+        return self.combo.currentText()
