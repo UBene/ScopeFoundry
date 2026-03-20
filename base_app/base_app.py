@@ -297,8 +297,15 @@ class BaseApp(QtCore.QObject):
         """
         report = {}
         error_msgs = {}
+        
         for path, value in settings.items():
-            report[path] = self.write_setting_safe(path, value, error_msgs)
+            if not path.startswith("measurement"):
+                report[path] = self.write_setting_safe(path, value, error_msgs)
+        
+        for path, value in settings.items():
+            if path.startswith("measurement"):
+                report[path] = self.write_setting_safe(path, value, error_msgs)                
+
         return report, error_msgs
 
     def settings_save_ini(self, fname: str, save_ro: bool = True) -> None:

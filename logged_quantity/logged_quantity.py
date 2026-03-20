@@ -1276,10 +1276,18 @@ class LoggedQuantity(QtCore.QObject):
                 for lq, new_val in zip(self.math_lqs, new_vals):
                     lq.update_value(new_val)
 
+        def read_from_hardware():
+            for lq in self.math_lqs:
+                if lq.has_hardware_read():
+                    lq.read_from_hardware()
+            return self.value
+
         for lq in self.math_lqs:
             lq.updated_value[()].connect(update_math)
             if reverse_func:
                 self.add_listener(update_math_reverse)
+            if reverse_func and not self.has_hardware_read():
+                self.read_from_hardware = read_from_hardware
 
         update_math()
 
