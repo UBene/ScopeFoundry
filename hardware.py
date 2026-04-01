@@ -1,10 +1,8 @@
-import json
 import sys
 import threading
 import time
 import warnings
 from functools import partial
-from pathlib import Path
 from typing import Callable
 
 from qtpy import QtCore, QtGui, QtWidgets
@@ -21,6 +19,24 @@ from .helper_funcs import (
 )
 from .logged_quantity import LQCollection
 from .operations import Operations
+
+
+class EnableConnectionQThread(QtCore.QThread):
+    def __init__(self, hardware, parent=None):
+        super(EnableConnectionQThread, self).__init__(parent)
+        self.hardware = hardware
+
+    def run(self):
+        self.hardware._enable_connection()
+
+
+class DisableConnectionQThread(QtCore.QThread):
+    def __init__(self, hardware, parent=None):
+        super(DisableConnectionQThread, self).__init__(parent)
+        self.hardware = hardware
+
+    def run(self):
+        self.hardware._disable_connection()
 
 
 class HardwareComponent:
@@ -62,6 +78,10 @@ class HardwareComponent:
 
         self.toggle_to_connected_count = 0
 
+        # set this flag to True to avoid blocking the ui during connection and disconnection.
+        # may not be fully backward capable: see also self.post_connect()
+        self.enable_connection_threaded = False
+
         self.connected = self.settings.New(
             "connected",
             dtype=bool,
@@ -81,9 +101,6 @@ class HardwareComponent:
         if self.auto_thread_lock:
             self.thread_lock_all_lq()
 
-        # self.has_been_connected_once = False # ever used?
-        # self.is_connected = False # ever used?
-
         self.q_object = HardwareQObject()
         self.connection_succeeded = self.q_object.connection_succeeded
         self.connection_failed = self.q_object.connection_failed
@@ -95,37 +112,55 @@ class HardwareComponent:
         self.q_object.connection_succeeded.connect(self.on_connection_succeeded)
         self.connected.updated_value[bool].connect(self.enable_connection)
 
-    def enable_connection(self, enable=True):
-        if enable:
-            try:
-                self.connect()
-                # start thread if needed
-                if hasattr(self, "run"):
-                    self.update_thread_interrupted = False
-                    self._update_thread = threading.Thread(target=self.run)
-                    self._update_thread.start()
+        self._enable_connection_thread = EnableConnectionQThread(self)
+        self._disable_connection_thread = DisableConnectionQThread(self)
 
-                self.connection_succeeded.emit()
-                self.toggle_to_connected_count += 1
-                print(f"{self.name} connected {self.toggle_to_connected_count} times")
-            except Exception as err:
-                self.connection_failed.emit()
-                raise err
+    def enable_connection(self, enable=True):
+
+        if self.enable_connection_threaded:
+            if enable:
+                self._enable_connection_thread.start()
+            else:
+                if not self.has_been_connected_once:
+                    return
+                self._disable_connection_thread.start()
         else:
-            if not self.has_been_connected_once:
-                return
+            if enable:
+                self._enable_connection()
+            else:
+                return self._disable_connection()
+
+    def _disable_connection(self):
+        if not self.has_been_connected_once:
+            return
+        try:
             try:
-                try:
-                    if hasattr(self, "run") and hasattr(self, "_update_thread"):
-                        self.update_thread_interrupted = True
-                        self._update_thread.join(timeout=5.0)
-                        del self._update_thread
-                finally:
-                    self.disconnect()
-                    self.set_connection_status("", "orange")
-            except Exception as err:
-                self.set_connection_status("⚠", "red")
-                raise err
+                if hasattr(self, "run") and hasattr(self, "_update_thread"):
+                    self.update_thread_interrupted = True
+                    self._update_thread.join(timeout=5.0)
+                    del self._update_thread
+            finally:
+                self.disconnect()
+                self.set_connection_status("", "orange")
+        except Exception as err:
+            self.set_connection_status("⚠", "red")
+            raise err
+
+    def _enable_connection(self):
+        try:
+            self.connect()
+            # start thread if needed
+            if hasattr(self, "run"):
+                self.update_thread_interrupted = False
+                self._update_thread = threading.Thread(target=self.run)
+                self._update_thread.start()
+
+            self.connection_succeeded.emit()
+            self.toggle_to_connected_count += 1
+            print(f"{self.name} connected {self.toggle_to_connected_count} times")
+        except Exception as err:
+            self.connection_failed.emit()
+            raise err
 
     def run(self):
         if hasattr(self, "threaded_update"):
@@ -150,14 +185,15 @@ class HardwareComponent:
         return self.settings.New(name, **kwargs)
 
     def on_connection_succeeded(self):
-        print(self.name, "connection succeeded!")
         self.connected.update_value(True)
+        self.post_connect()
         self.set_connection_status("✓", "green")
+        print(self.name, "connection succeeded!")
 
     def on_connection_failed(self):
-        print(self.name, "connection failed!")
         self.connected.update_value(False)
         self.set_connection_status("⚠", "red")
+        print(self.name, "connection failed!")
 
     @property
     def gui(self):
@@ -307,8 +343,16 @@ class HardwareComponent:
         """
         Disconnects the hardware and severs hardware--:class:`LoggedQuantity` links
         """
-
         raise NotImplementedError()
+
+    def post_connect(self):
+        """
+        Gets called in the main thread after self.connect is run successfully.
+        Intended to be used in conjunction with self.enable_connection_threaded = True.
+        Handle connection amongst logged quantities (e.g. with .connect_lq_math, .connect_lq_scale) here
+        as these links are handled properly during self.connect() if is run in a separate threat.
+        """
+        return
 
 
 class HardwareQObject(QtCore.QObject):
