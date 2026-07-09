@@ -1,4 +1,5 @@
 import itertools
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 import time
 from copy import copy
@@ -8,7 +9,7 @@ from functools import partial
 import matplotlib.pyplot as plt
 import numpy as np
 import pyqtgraph as pg
-from qtpy import QtWidgets
+from qtpy import QtWidgets, QtGui
 
 from ScopeFoundry import BaseMicroscopeApp, Measurement
 from ScopeFoundry.scanning.actuators import (
@@ -205,9 +206,12 @@ class SweepNDBase(Measurement):
 
         self.display_ready = False
 
-        N = 1
-        for arr in arrays:
-            N *= arr.size
+        if self.settings["scan_mode"] == "co-move":
+            N = arrays[0].size
+        else:
+            N = 1
+            for arr in arrays:
+                N *= arr.size
 
         return {
             "positions_gen_func": lambda: self.mk_positions_gen(
@@ -256,12 +260,20 @@ class SweepNDBase(Measurement):
         self.monitor_list_widget.start_all_monitors()
 
         self.first_loop = True
+        # None means unknown total (indefinite resweep), so progress reflects the current sweep only
+        self.total_sweeps = (
+            1
+            if s["scan_mode"].startswith("RETAKE")
+            else None if s["remaining_sweeps"] < 0 else s["remaining_sweeps"] + 1
+        )
 
         while True:
             # print("current sweep", self.scan_data.current_sweep)
 
             if not self._should_continue_sweep():
                 break
+            
+            self.settings["remaining_sweeps"] = self.settings["remaining_sweeps"] - 1
 
             if self.scan_data.current_sweep > 0:
                 scan_data.extend_for_reps(collectors)
@@ -297,7 +309,16 @@ class SweepNDBase(Measurement):
                     # self.post_dset_initialized()
 
                 self.progress_index = next(progress_index_gen)
-                self.set_progress(100 * (self.progress_index + 1) / N)
+
+                sweep_pct = 100 * (self.progress_index + 1) / N
+                if self.total_sweeps is None:
+                    self.set_progress(sweep_pct)
+                else:
+                    self.set_progress(
+                        100
+                        * (self.scan_data.current_sweep + sweep_pct / 100)
+                        / self.total_sweeps
+                    )
 
             self.scan_data.current_sweep += 1
 
@@ -317,7 +338,9 @@ class SweepNDBase(Measurement):
             self.set_status("RETAKE modes - only one sweep allowed", "r")
             return False
 
-        return self.settings["re-sweep"]
+        if self.settings["remaining_sweeps"] == 0:
+            return False
+        return True
 
     def _execute_position(
         self,
@@ -331,8 +354,11 @@ class SweepNDBase(Measurement):
         """Execute a single sweep position. Returns True if sweep should be interrupted."""
         # Set positions and wait
         pretty_pos = ", ".join([f"{p:.1f}" for p in positions])
-        self.set_status(f"setting {pretty_pos} and waiting", "g")
-        self.go_to_positions(positions, actuators)
+        self.set_status(
+            f"setting {pretty_pos} and waiting in sweep {self.scan_data.current_sweep + 1}",
+            "g",
+        )
+        self.go_to_positions(positions, actuators, block=True, timeout=60.0)
         delay = settings["collection_delay"]
         if ii == 0:
             delay += settings["initial_delay"]
@@ -366,7 +392,10 @@ class SweepNDBase(Measurement):
         pretty_pos,
     ):
         """Execute a single collector at current position."""
-        self.set_status(f"collecting {collector.name} on {pretty_pos}", "g")
+        self.set_status(
+            f"collecting {collector.name} on {pretty_pos} in sweep {self.scan_data.current_sweep + 1}",
+            "g",
+        )
         self.prepare_collector_at_position(collector, positions, base_indices)
 
         self.monitor_list_widget.inform_enabled_monitors(f"start_{collector.name}")
@@ -420,14 +449,109 @@ class SweepNDBase(Measurement):
         for k, v in scan_data.data.items():
             print(k, np.array(v).shape)
 
+    def pre_run(self) -> None:
+        remaining_sweeps = self.settings["remaining_sweeps"]
+        if remaining_sweeps == 0:
+            self.settings["remaining_sweeps"] = 1
+            self.set_status(
+                "remaining_sweeps was 0, set to 1 to allow this run to sweep once",
+                "y",
+                True,
+            )
+            remaining_sweeps = 1
+
+        self._remaining_sweeps_to_restore = remaining_sweeps
+
     def post_run(self) -> None:
+        self.settings["remaining_sweeps"] = self._remaining_sweeps_to_restore
+
         self.save_png()
 
-    def go_to_positions(self, positions, actuators=None) -> None:
+    def _shutdown_executor_now(self, executor: ThreadPoolExecutor) -> None:
+        try:
+            executor.shutdown(wait=False, cancel_futures=True)
+        except TypeError:
+            # Python < 3.9 fallback
+            executor.shutdown(wait=False)
+
+    def _cleanup_background_go_jobs(self) -> None:
+        jobs = getattr(self, "_go_to_positions_jobs", [])
+        active_jobs = []
+        for executor, futures in jobs:
+            if all(f.done() for f in futures):
+                self._shutdown_executor_now(executor)
+            else:
+                active_jobs.append((executor, futures))
+        self._go_to_positions_jobs = active_jobs
+
+    def cancel_go_to_positions_block(self) -> None:
+        """Cancel waiting in blocking go_to_positions calls."""
+        self._go_to_positions_abort_requested = True
+        for future in getattr(self, "_go_to_positions_block_futures", []):
+            future.cancel()
+
+        executor = getattr(self, "_go_to_positions_block_executor", None)
+        if executor is not None:
+            self._shutdown_executor_now(executor)
+
+    def go_to_positions(
+        self, positions, actuators=None, block: bool = True, timeout: float = None
+    ) -> None:
         if actuators is None:
             actuators = self.get_current_actuator_funcs()
-        for (_, write), position in zip(actuators, positions):
-            write(position)
+        write_calls = [
+            (write, position) for (_, write), position in zip(actuators, positions)
+        ]
+        if not write_calls:
+            return
+
+        self._cleanup_background_go_jobs()
+        executor = ThreadPoolExecutor(max_workers=len(write_calls))
+        futures = [executor.submit(write, position) for write, position in write_calls]
+
+        if not block:
+            jobs = getattr(self, "_go_to_positions_jobs", [])
+            jobs.append((executor, futures))
+            self._go_to_positions_jobs = jobs
+            return
+
+        self._go_to_positions_abort_requested = False
+        self._go_to_positions_block_executor = executor
+        self._go_to_positions_block_futures = futures
+
+        try:
+            deadline = None if timeout is None else time.monotonic() + timeout
+            pending = set(futures)
+            while pending:
+                if (
+                    self._go_to_positions_abort_requested
+                    or self.interrupt_measurement_called
+                ):
+                    for future in pending:
+                        future.cancel()
+                    break
+
+                wait_timeout = 0.05
+                if deadline is not None:
+                    wait_timeout = min(
+                        wait_timeout, max(deadline - time.monotonic(), 0.0)
+                    )
+
+                done, pending = wait(
+                    pending,
+                    timeout=wait_timeout,
+                    return_when=FIRST_COMPLETED,
+                )
+                for future in done:
+                    future.result()
+
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise TimeoutError("go_to_positions timed out")
+        finally:
+            self._shutdown_executor_now(executor)
+            self._go_to_positions_block_executor = None
+            self._go_to_positions_block_futures = []
+            self._go_to_positions_abort_requested = False
 
     def prepare_at_position(
         self, positions: Tuple[float], base_indices: Tuple[int]
@@ -505,6 +629,7 @@ class SweepNDBase(Measurement):
         self.dataset_names = []
         self.extent_control_names = []
         super().__init__(app, name)
+        self.color = "#777777"  # QtGui.QColor.fromHsl(20, 22, 22, 25)  # Example color, replace with desired hex color code
 
     def setup(self) -> None:
         self.display_ready = False
@@ -536,12 +661,15 @@ class SweepNDBase(Measurement):
             name="collection_delay",
             initial=0.01,
             unit="s",
-            description="after setting first actuator(s) position(s), data collection is delayed, allowing the system to reach steady state",
+            spinbox_decimals=3,
+            description="after setting first actuator(s) position(s), data collection is delayed, allowing the system to reach steady state",       
         )
         s.New(
             name="initial_delay",
+            dtype=float,
             initial=0.0,
             unit="s",
+            spinbox_decimals=3,
             description="additional delay added to collection_delay for the first point sweep. Useful when reaching first sweep point takes somwhat longer than the rest of the points.",
         )
         s.New(
@@ -579,8 +707,8 @@ class SweepNDBase(Measurement):
             name="dset_reducer",
             dtype=str,
             initial="None",
-            choices=["None", "max", "min", "center_index"],
-            description="<p>Reduce the data to a number at each sweep point:<p>None: no reduction<p>max: maximum<p>min: minimum<p>center_index: middle data point when data per point is flattened",
+            choices=["None", "mean", "median", "max", "min", "first", "middle", "last"],
+            description="<p>Reduce the data to a scalar at each sweep point:<p>None: no reduction<p>mean: average<p>median: median<p>max: maximum<p>min: minimum<p>first: first data point (when data per point is flattened) <p>middle: middle data point (when data per point is flattened)<p>last: last data point (when data per point is flattened)",
         ).add_listener(self.update_display)
 
         s.New(
@@ -595,11 +723,13 @@ class SweepNDBase(Measurement):
             initial=0,
             description="stop index of slice to retake (EXCLUSIVE!)",
         )
+
+        self._remaining_sweeps_to_restore = 1
         s.New(
-            "re-sweep",
-            bool,
-            initial=False,
-            description="after current sweep is completed the measurement restarts (indefinitely) to add more repetitions. Uncheck to stop the measurement after current sweep is completed.",
+            "remaining_sweeps",
+            int,
+            initial=1,
+            description="number of additional sweeps remaining, decremented when sweep starts. <p><p> Set a negative value to resweep indefinitely. <p><p>Set to 0 to stop after the current sweep completes.",
         )
         for i in range(self.n_any_measurements):
             self.collectors.append(
@@ -637,7 +767,15 @@ class SweepNDBase(Measurement):
             self.update_widgets,
             description="click after connecting to hardware to extend actuator options",
             icon_path=self.app.qtapp.style().standardIcon(
-                QtWidgets.QStyle.SP_BrowserReload
+                QtWidgets.QStyle.StandardPixmap.SP_BrowserReload
+            ),
+        )
+        self.add_operation(
+            "stop actuators",
+            self.cancel_go_to_positions_block,
+            description="cancel waiting in blocking go_to_positions calls",
+            icon_path=self.app.qtapp.style().standardIcon(
+                QtWidgets.QStyle.StandardPixmap.SP_BrowserStop
             ),
         )
 
@@ -662,7 +800,9 @@ class SweepNDBase(Measurement):
             monitor.settings.get_lq("setting").change_choice_list(paths)
 
         self.actuator_defs = add_all_possible_actuators_and_parse_definitions(
-            actuator_definitions=self.user_defined_actuators, app=self.app
+            actuator_definitions=self.user_defined_actuators,
+            app=self.app,
+            filter_has_hardware_write=False,
         )
         self.actuators_funcs = get_actuator_funcs(self.app, self.actuator_defs)
 
@@ -805,7 +945,12 @@ class SweepNDBase(Measurement):
 
         vlayout.addWidget(self.new_start_stop_button())
 
-        include = ("collection_delay", "initial_delay", "res_in_new_dir", "re-sweep")
+        include = (
+            "collection_delay",
+            "initial_delay",
+            "res_in_new_dir",
+            "remaining_sweeps",
+        )
         vlayout.addWidget(self.settings.New_UI(include))
 
         update_btn = self.operations.new_button("update widgets")
@@ -816,6 +961,14 @@ class SweepNDBase(Measurement):
             }
         """)
         vlayout.addWidget(update_btn)
+        cancel_btn = self.operations.new_button("stop actuators")
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                color: #320000;
+                font-weight: 500;
+            }
+        """)
+        vlayout.addWidget(cancel_btn)
 
         run_widget.setFlat(False)
         run_widget.setMaximumWidth(220)
@@ -1168,8 +1321,23 @@ class SweepNDBase(Measurement):
         elif self.settings["dset_reducer"] == "min":
             img = np.nanmin(img, axis=1).reshape((-1, 1))
             size = 1
-        elif self.settings["dset_reducer"] == "center_index":
-            img = img[:, img.size // 2].reshape((-1, 1))
+        elif self.settings["dset_reducer"] == "mean":
+            img = np.nanmean(img, axis=1).reshape((-1, 1))
+            size = 1
+        elif self.settings["dset_reducer"] == "median":
+            img = np.nanmedian(img, axis=1).reshape((-1, 1))
+            size = 1
+        elif self.settings["dset_reducer"] == "sum":
+            img = np.nansum(img, axis=1).reshape((-1, 1))
+            size = 1
+        elif self.settings["dset_reducer"] == "first":
+            img = img[:, 0].reshape((-1, 1))
+            size = 1
+        elif self.settings["dset_reducer"] == "middle":
+            img = img[:, img.shape[1] // 2].reshape((-1, 1))
+            size = 1
+        elif self.settings["dset_reducer"] == "last":
+            img = img[:, -1].reshape((-1, 1))
             size = 1
 
         # Apply data range limits

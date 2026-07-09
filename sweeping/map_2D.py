@@ -232,7 +232,6 @@ class Map2D(Sweep2D):
 
     def calc_rect(self) -> QtCore.QRectF:
         x0, x1, y0, y1 = self.calc_imshow_extent()
-        print(x0, y0, x1 - x0, (y1 - y0))
         return QtCore.QRectF(x0, y0, x1 - x0, (y1 - y0))
 
     def on_mouse_update_scan_roi(self):

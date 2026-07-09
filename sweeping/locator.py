@@ -8,6 +8,7 @@ import numpy as np
 class LocatorBase:
 
     def __init__(self, sweep_measurement, position_list):
+        self.real_position_on_x = False
         self.sweep = sweep_measurement
         self.position_list = position_list
         self.axes = None
@@ -78,9 +79,7 @@ class LocatorBase:
 
     def set_actuator_positions(self, positions: Tuple[float, ...]) -> None:
         """Set actuator positions based on locator position."""
-        funcs = self.sweep.get_current_target_position_funcs()
-        for p, f in zip(positions, funcs):
-            f(p)
+        self.sweep.go_to_positions(positions, block=False)
 
     def set_as_center(self, positions: Tuple[float, ...]) -> None:
         """Set positions as center of scan ranges."""
@@ -294,7 +293,6 @@ class LocatorX(LocatorBase):
 
     def __init__(self, sweep_measurement, position_list):
         super().__init__(sweep_measurement, position_list)
-        self.real_position_on_x = False
 
     def setup_indicator(
         self,
