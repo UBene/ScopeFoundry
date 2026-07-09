@@ -78,9 +78,7 @@ class LocatorBase:
 
     def set_actuator_positions(self, positions: Tuple[float, ...]) -> None:
         """Set actuator positions based on locator position."""
-        funcs = self.sweep.get_current_target_position_funcs()
-        for p, f in zip(positions, funcs):
-            f(p)
+        self.sweep.go_to_positions(positions, block=False)
 
     def set_as_center(self, positions: Tuple[float, ...]) -> None:
         """Set positions as center of scan ranges."""
