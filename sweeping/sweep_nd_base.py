@@ -1,4 +1,5 @@
 import itertools
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 import time
 from copy import copy
@@ -332,7 +333,7 @@ class SweepNDBase(Measurement):
         # Set positions and wait
         pretty_pos = ", ".join([f"{p:.1f}" for p in positions])
         self.set_status(f"setting {pretty_pos} and waiting", "g")
-        self.go_to_positions(positions, actuators)
+        self.go_to_positions(positions, actuators, block=True, timeout=60.0)
         delay = settings["collection_delay"]
         if ii == 0:
             delay += settings["initial_delay"]
@@ -423,11 +424,91 @@ class SweepNDBase(Measurement):
     def post_run(self) -> None:
         self.save_png()
 
-    def go_to_positions(self, positions, actuators=None) -> None:
+    def _shutdown_executor_now(self, executor: ThreadPoolExecutor) -> None:
+        try:
+            executor.shutdown(wait=False, cancel_futures=True)
+        except TypeError:
+            # Python < 3.9 fallback
+            executor.shutdown(wait=False)
+
+    def _cleanup_background_go_jobs(self) -> None:
+        jobs = getattr(self, "_go_to_positions_jobs", [])
+        active_jobs = []
+        for executor, futures in jobs:
+            if all(f.done() for f in futures):
+                self._shutdown_executor_now(executor)
+            else:
+                active_jobs.append((executor, futures))
+        self._go_to_positions_jobs = active_jobs
+
+    def cancel_go_to_positions_block(self) -> None:
+        """Cancel waiting in blocking go_to_positions calls."""
+        self._go_to_positions_abort_requested = True
+        for future in getattr(self, "_go_to_positions_block_futures", []):
+            future.cancel()
+
+        executor = getattr(self, "_go_to_positions_block_executor", None)
+        if executor is not None:
+            self._shutdown_executor_now(executor)
+
+    def go_to_positions(
+        self, positions, actuators=None, block: bool = True, timeout: float = None
+    ) -> None:
         if actuators is None:
             actuators = self.get_current_actuator_funcs()
-        for (_, write), position in zip(actuators, positions):
-            write(position)
+        write_calls = [
+            (write, position) for (_, write), position in zip(actuators, positions)
+        ]
+        if not write_calls:
+            return
+
+        self._cleanup_background_go_jobs()
+        executor = ThreadPoolExecutor(max_workers=len(write_calls))
+        futures = [executor.submit(write, position) for write, position in write_calls]
+
+        if not block:
+            jobs = getattr(self, "_go_to_positions_jobs", [])
+            jobs.append((executor, futures))
+            self._go_to_positions_jobs = jobs
+            return
+
+        self._go_to_positions_abort_requested = False
+        self._go_to_positions_block_executor = executor
+        self._go_to_positions_block_futures = futures
+
+        try:
+            deadline = None if timeout is None else time.monotonic() + timeout
+            pending = set(futures)
+            while pending:
+                if (
+                    self._go_to_positions_abort_requested
+                    or self.interrupt_measurement_called
+                ):
+                    for future in pending:
+                        future.cancel()
+                    break
+
+                wait_timeout = 0.05
+                if deadline is not None:
+                    wait_timeout = min(
+                        wait_timeout, max(deadline - time.monotonic(), 0.0)
+                    )
+
+                done, pending = wait(
+                    pending,
+                    timeout=wait_timeout,
+                    return_when=FIRST_COMPLETED,
+                )
+                for future in done:
+                    future.result()
+
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise TimeoutError("go_to_positions timed out")
+        finally:
+            self._shutdown_executor_now(executor)
+            self._go_to_positions_block_executor = None
+            self._go_to_positions_block_futures = []
+            self._go_to_positions_abort_requested = False
 
     def prepare_at_position(
         self, positions: Tuple[float], base_indices: Tuple[int]
@@ -579,8 +660,8 @@ class SweepNDBase(Measurement):
             name="dset_reducer",
             dtype=str,
             initial="None",
-            choices=["None", "max", "min", "center_index"],
-            description="<p>Reduce the data to a number at each sweep point:<p>None: no reduction<p>max: maximum<p>min: minimum<p>center_index: middle data point when data per point is flattened",
+            choices=["None", "mean", "median", "max", "min", "first", "middle", "last"],
+            description="<p>Reduce the data to a scalar at each sweep point:<p>None: no reduction<p>mean: average<p>median: median<p>max: maximum<p>min: minimum<p>first: first data point (when data per point is flattened) <p>middle: middle data point (when data per point is flattened)<p>last: last data point (when data per point is flattened)",
         ).add_listener(self.update_display)
 
         s.New(
@@ -637,7 +718,15 @@ class SweepNDBase(Measurement):
             self.update_widgets,
             description="click after connecting to hardware to extend actuator options",
             icon_path=self.app.qtapp.style().standardIcon(
-                QtWidgets.QStyle.SP_BrowserReload
+                QtWidgets.QStyle.StandardPixmap.SP_BrowserReload
+            ),
+        )
+        self.add_operation(
+            "stop actuators",
+            self.cancel_go_to_positions_block,
+            description="cancel waiting in blocking go_to_positions calls",
+            icon_path=self.app.qtapp.style().standardIcon(
+                QtWidgets.QStyle.StandardPixmap.SP_BrowserStop
             ),
         )
 
@@ -816,6 +905,14 @@ class SweepNDBase(Measurement):
             }
         """)
         vlayout.addWidget(update_btn)
+        cancel_btn = self.operations.new_button("stop actuators")
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                color: #320000;
+                font-weight: 500;
+            }
+        """)
+        vlayout.addWidget(cancel_btn)
 
         run_widget.setFlat(False)
         run_widget.setMaximumWidth(220)
@@ -1168,8 +1265,23 @@ class SweepNDBase(Measurement):
         elif self.settings["dset_reducer"] == "min":
             img = np.nanmin(img, axis=1).reshape((-1, 1))
             size = 1
-        elif self.settings["dset_reducer"] == "center_index":
-            img = img[:, img.size // 2].reshape((-1, 1))
+        elif self.settings["dset_reducer"] == "mean":
+            img = np.nanmean(img, axis=1).reshape((-1, 1))
+            size = 1
+        elif self.settings["dset_reducer"] == "median":
+            img = np.nanmedian(img, axis=1).reshape((-1, 1))
+            size = 1
+        elif self.settings["dset_reducer"] == "sum":
+            img = np.nansum(img, axis=1).reshape((-1, 1))
+            size = 1
+        elif self.settings["dset_reducer"] == "first":
+            img = img[:, 0].reshape((-1, 1))
+            size = 1
+        elif self.settings["dset_reducer"] == "middle":
+            img = img[:, img.shape[1] // 2].reshape((-1, 1))
+            size = 1
+        elif self.settings["dset_reducer"] == "last":
+            img = img[:, -1].reshape((-1, 1))
             size = 1
 
         # Apply data range limits
