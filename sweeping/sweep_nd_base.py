@@ -206,9 +206,12 @@ class SweepNDBase(Measurement):
 
         self.display_ready = False
 
-        N = 1
-        for arr in arrays:
-            N *= arr.size
+        if self.settings["scan_mode"] == "co-move":
+            N = arrays[0].size
+        else:
+            N = 1
+            for arr in arrays:
+                N *= arr.size
 
         return {
             "positions_gen_func": lambda: self.mk_positions_gen(
@@ -298,6 +301,7 @@ class SweepNDBase(Measurement):
                     # self.post_dset_initialized()
 
                 self.progress_index = next(progress_index_gen)
+                
                 self.set_progress(100 * (self.progress_index + 1) / N)
 
             self.scan_data.current_sweep += 1
@@ -751,7 +755,7 @@ class SweepNDBase(Measurement):
             monitor.settings.get_lq("setting").change_choice_list(paths)
 
         self.actuator_defs = add_all_possible_actuators_and_parse_definitions(
-            actuator_definitions=self.user_defined_actuators, app=self.app
+            actuator_definitions=self.user_defined_actuators, app=self.app, filter_has_hardware_write=False
         )
         self.actuators_funcs = get_actuator_funcs(self.app, self.actuator_defs)
 
