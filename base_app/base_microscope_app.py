@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Protocol
 from qtpy import QtCore, QtGui, QtWidgets
 
 from ScopeFoundry import h5_io, ini_io
+from ScopeFoundry.base_app.auto_color import auto_color
 from ScopeFoundry.dynamical_widgets import new_tree_widget, new_widget
 from ScopeFoundry.h5_analyze_with_ipynb import generate_loaders_py, update_ipynb
 from ScopeFoundry.helper_funcs import (
@@ -71,6 +72,7 @@ class BaseMicroscopeApp(BaseApp):
     """The name of the microscope app, default is ScopeFoundry."""
     mdi = True
     """Multiple Document Interface flag. Tells the app whether to include an MDI widget in the app."""
+    colorize_components = False
 
     def __init__(self, argv: List[str] = [], **kwargs: Any) -> None:
         super().__init__(argv, **kwargs)
@@ -217,9 +219,13 @@ class BaseMicroscopeApp(BaseApp):
     def _setup_ui_tree_column(self) -> None:
 
         self.mm_tree = new_tree_widget(
-            self.measurements.values(), ["Measurements", "Value"]
+            self.measurements.values(),
+            ["Measurements", "Value"],
         )
-        self.hw_tree = new_tree_widget(self.hardware.values(), ["Hardware", "Value"])
+        self.hw_tree = new_tree_widget(
+            self.hardware.values(),
+            ["Hardware", "Value"],
+        )
         app_widget = new_widget(
             obj=self,
             title="app",
@@ -262,7 +268,7 @@ class BaseMicroscopeApp(BaseApp):
             self.log.debug(f"setting up figure for measurement {name}")
             ui = self.load_measure_ui(measure)
             if ui is not None:
-                subwin = self.add_mdi_subwin(ui, measure.name)
+                subwin = self.add_mdi_subwin(ui, measure.name, measure.color)
                 measure.subwin = subwin
 
     def _load_all_measure_uis(self) -> None:
@@ -475,7 +481,7 @@ class BaseMicroscopeApp(BaseApp):
             subwin.raise_()
 
     def add_mdi_subwin(
-        self, widget: QtWidgets.QWidget, name: str
+        self, widget: QtWidgets.QWidget, name: str, color: QtGui.QColor = None
     ) -> QtWidgets.QMdiSubWindow:
         mdiArea: QtWidgets.QMdiArea = self.ui.mdiArea
 
@@ -582,6 +588,8 @@ class BaseMicroscopeApp(BaseApp):
         if inspect.isclass(hw):
             hw = hw(app=self)
 
+        hw.color = auto_color(hw)
+
         if hw.name in self.hardware.keys():
             raise ValueError(
                 f"Hardware '{hw.name}' already exists. Remove it first with app.remove_hardware('{hw.name}')"
@@ -639,6 +647,8 @@ class BaseMicroscopeApp(BaseApp):
         if inspect.isclass(measure):
             measure = measure(app=self)
 
+        measure.color = auto_color(measure)
+
         if measure.name in self.measurements.keys():
             raise ValueError(
                 f"Measurement '{measure.name}' already exists. Remove it first with app.remove_measurement('{measure.name}')"
@@ -656,7 +666,7 @@ class BaseMicroscopeApp(BaseApp):
         if self.mdi and hasattr(self, "ui"):
             ui = self.load_measure_ui(measure)
             if ui is not None:
-                subwin = self.add_mdi_subwin(ui, measure.name)
+                subwin = self.add_mdi_subwin(ui, measure.name, measure.color)
                 measure.subwin = subwin
 
         return measure

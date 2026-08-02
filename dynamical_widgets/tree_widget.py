@@ -20,11 +20,26 @@ class SubtreeAbleObj(Protocol):
     def on_right_click(self): ...  # optional
 
 
+class SFQTreeWidget(QtWidgets.QTreeWidget):
+    """QTreeWidget with top-level branch background matched to header color."""
+
+    def drawBranches(self, painter, rect, index):
+        item = self.itemFromIndex(index)
+        if item is not None and item.parent() is None:
+            bg = item.background(0)
+            if bg.style() != QtCore.Qt.NoBrush:
+                painter.fillRect(rect, bg)
+        super().drawBranches(painter, rect, index)
+
+
 def new_tree_widget(
-    objs: List[SubtreeAbleObj], header=["col0", ""], include=None, exclude=None
+    objs: List[SubtreeAbleObj],
+    header=["col0", ""],
+    include=None,
+    exclude=None,
 ) -> QtWidgets.QTreeWidget:
     """returns a tree widget that represents objects with their settings and operations"""
-    tree_widget = QtWidgets.QTreeWidget()
+    tree_widget = SFQTreeWidget()
     tree_widget.setColumnCount(len(header))
     tree_widget.setHeaderLabels(header)
     tree_widget.setColumnWidth(0, 180)
@@ -79,6 +94,15 @@ class SubtreeManager:
         self.operation_items = {}
 
         self.header_item = SFQTreeWidgetItem(tree_widget, [obj.name, ""])
+        header_bg = getattr(obj, "color", None)
+        if header_bg is not None:
+            header_fg = QtGui.QColor("white")
+            header_font = self.header_item.font(0)
+            header_font.setBold(False)
+            for col in range(tree_widget.columnCount()):
+                self.header_item.setBackground(col, header_bg)
+                self.header_item.setForeground(col, header_fg)
+                self.header_item.setFont(col, header_font)
         self.tree_widget = tree_widget  # the widget where instance lives
 
         if hasattr(obj, "on_new_subtree"):
@@ -136,27 +160,27 @@ class SubtreeManager:
         self.settings.q_object.lq_removed.disconnect(self.remove_lq_child_item)
         self.operations.q_object.added.disconnect(self.add_operation_child_item)
         self.operations.q_object.removed.disconnect(self.remove_operation_child_item)
-        
+
         for child_item in list(self.settings_items.values()):
             widget = self.tree_widget.itemWidget(child_item, 1)
             if widget:
                 widget.deleteLater()
             self.header_item.removeChild(child_item)
-        
+
         for child_item in list(self.operation_items.values()):
             widget = self.tree_widget.itemWidget(child_item, 1)
             if widget:
                 widget.deleteLater()
             self.header_item.removeChild(child_item)
-        
+
         header_widget = self.tree_widget.itemWidget(self.header_item, 1)
         if header_widget:
             header_widget.deleteLater()
-        
+
         index = self.tree_widget.indexOfTopLevelItem(self.header_item)
         if index >= 0:
             self.tree_widget.takeTopLevelItem(index)
-        
+
         self.settings_items.clear()
         self.operation_items.clear()
 

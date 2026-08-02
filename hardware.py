@@ -43,6 +43,7 @@ class HardwareComponent:
         if name is not None:
             self.name = name
 
+        self.color = None  # set to "AUTO" or best results with QtGui.QColor.fromHsv(hue, 58, 122, 95)
         self.app = app
 
         self.settings = LQCollection(
