@@ -73,6 +73,8 @@ class Measurement:
         if name is not None:
             self.name = name
 
+        self.color = None  # set to "AUTO" or best results with QtGui.QColor.fromHsv(hue, 58, 122, 95)
+
         self.app = app
 
         self.display_update_period = 0.1  # seconds
@@ -405,6 +407,7 @@ class Measurement:
         nested_interrupt: bool = True,
         polling_func: Callable = None,
         polling_time: float = 0.1,
+        never_interrupt_measure=False,
     ):
         """
         Start another nested measurement *measure* and wait until completion.
@@ -441,8 +444,9 @@ class Measurement:
 
         # Now that it is running, wait until done
         while measure.is_measuring():
-            if self.interrupt_measurement_called:
+            if self.interrupt_measurement_called and never_interrupt_measure == False:
                 # print('nest outer interrupted', self.interrupt_measurement_called)
+
                 measure.interrupt()
 
             if measure.interrupt_measurement_called and nested_interrupt:
