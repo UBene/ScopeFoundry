@@ -95,22 +95,23 @@ class HardwareComponent:
         self.q_object.connection_succeeded.connect(self.on_connection_succeeded)
         self.connected.updated_value[bool].connect(self.enable_connection)
 
+        self._connect_thread = None
+        self._connect_in_progress = False
+        self._connect_lock = threading.Lock()
+
     def enable_connection(self, enable=True):
         if enable:
-            try:
-                self.connect()
-                # start thread if needed
-                if hasattr(self, "run"):
-                    self.update_thread_interrupted = False
-                    self._update_thread = threading.Thread(target=self.run)
-                    self._update_thread.start()
+            with self._connect_lock:
+                if self._connect_in_progress:
+                    return
+                self._connect_in_progress = True
 
-                self.connection_succeeded.emit()
-                self.toggle_to_connected_count += 1
-                print(f"{self.name} connected {self.toggle_to_connected_count} times")
-            except Exception as err:
-                self.connection_failed.emit()
-                raise err
+            self._connect_thread = threading.Thread(
+                target=self._connect_worker,
+                name=f"{self.name}_connect_thread",
+                daemon=True,
+            )
+            self._connect_thread.start()
         else:
             if not self.has_been_connected_once:
                 return
@@ -126,6 +127,25 @@ class HardwareComponent:
             except Exception as err:
                 self.set_connection_status("⚠", "red")
                 raise err
+
+    def _connect_worker(self):
+        try:
+            self.connect()
+            # start thread if needed
+            if hasattr(self, "run"):
+                self.update_thread_interrupted = False
+                self._update_thread = threading.Thread(target=self.run)
+                self._update_thread.start()
+
+            self.connection_succeeded.emit()
+            self.toggle_to_connected_count += 1
+            print(f"{self.name} connected {self.toggle_to_connected_count} times")
+        except Exception:
+            self.connection_failed.emit()
+            self.log.exception(f"{self.name} connect failed")
+        finally:
+            with self._connect_lock:
+                self._connect_in_progress = False
 
     def run(self):
         if hasattr(self, "threaded_update"):
