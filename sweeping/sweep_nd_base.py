@@ -9,7 +9,7 @@ from functools import partial
 import matplotlib.pyplot as plt
 import numpy as np
 import pyqtgraph as pg
-from qtpy import QtWidgets
+from qtpy import QtWidgets, QtGui
 
 from ScopeFoundry import BaseMicroscopeApp, Measurement
 from ScopeFoundry.scanning.actuators import (
@@ -301,7 +301,7 @@ class SweepNDBase(Measurement):
                     # self.post_dset_initialized()
 
                 self.progress_index = next(progress_index_gen)
-                
+
                 self.set_progress(100 * (self.progress_index + 1) / N)
 
             self.scan_data.current_sweep += 1
@@ -590,6 +590,7 @@ class SweepNDBase(Measurement):
         self.dataset_names = []
         self.extent_control_names = []
         super().__init__(app, name)
+        self.color = "#777777"  # QtGui.QColor.fromHsl(20, 22, 22, 25)  # Example color, replace with desired hex color code
 
     def setup(self) -> None:
         self.display_ready = False
@@ -755,7 +756,9 @@ class SweepNDBase(Measurement):
             monitor.settings.get_lq("setting").change_choice_list(paths)
 
         self.actuator_defs = add_all_possible_actuators_and_parse_definitions(
-            actuator_definitions=self.user_defined_actuators, app=self.app, filter_has_hardware_write=False
+            actuator_definitions=self.user_defined_actuators,
+            app=self.app,
+            filter_has_hardware_write=False,
         )
         self.actuators_funcs = get_actuator_funcs(self.app, self.actuator_defs)
 
