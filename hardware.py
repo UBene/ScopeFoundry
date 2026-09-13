@@ -96,6 +96,10 @@ class HardwareComponent:
         self.q_object.connection_succeeded.connect(self.on_connection_succeeded)
         self.connected.updated_value[bool].connect(self.enable_connection)
 
+        # EXPERIMENTAL: if True, connect() will be called in a separate thread, allowing the GUI to remain responsive during connection. If False, connect() will be called in the main thread, which may block the GUI if connection takes a long time.
+        # know issue: connect_lq_math and other lq connections may not work properly if connect() is called in a separate thread
+        self.use_thread_for_connection = False
+
         self._connect_thread = None
         self._connect_in_progress = False
         self._connect_lock = threading.Lock()
@@ -107,12 +111,15 @@ class HardwareComponent:
                     return
                 self._connect_in_progress = True
 
-            self._connect_thread = threading.Thread(
-                target=self._connect_worker,
-                name=f"{self.name}_connect_thread",
-                daemon=True,
-            )
-            self._connect_thread.start()
+            if self.use_thread_for_connection:
+                self._connect_thread = threading.Thread(
+                    target=self._connect_worker,
+                    name=f"{self.name}_connect_thread",
+                    daemon=True,
+                )
+                self._connect_thread.start()
+            else:
+                self._connect_worker()
         else:
             if not self.has_been_connected_once:
                 return
