@@ -14,6 +14,7 @@ class DatasetMetadata:
     t0: int
     h5_file_path: Path
     app_name: str = None
+    measurement_name: str = None
 
     def get_file_path(self, suffix: str = ".h5") -> Path:
         return self.h5_file_path.with_suffix(suffix)
@@ -33,6 +34,7 @@ class DatasetMetadata:
                 # "Warning": "This dataset is not for public distribution.",
                 "Source": self.app_name,    
                 # "Comment": "This dataset is for internal use only.",
+                "measurement_name": self.measurement_name
             },
         }
 
@@ -52,12 +54,13 @@ def new_dataset_metadata(measurement=None, fname: str = None) -> DatasetMetadata
                 unique_id_short=unique_id[0:13],
                 ext="h5",
             )
+            
         h5_file_path = Path(app.settings["save_dir"]) / fname
-        return DatasetMetadata(unique_id, u, t0, h5_file_path, app_name=app.name)
+        return DatasetMetadata(unique_id, u, t0, h5_file_path, app_name=app.name, measurement_name=measurement.name)
 
     if fname is None:
         h5_file_path = Path.cwd() / f"{datetime.fromtimestamp(t0):%y%m%d_%H%M%S}.h5"
     else:
         h5_file_path = Path(fname).with_suffix(".h5")
 
-    return DatasetMetadata(unique_id, u, t0, h5_file_path, app_name=None)
+    return DatasetMetadata(unique_id, u, t0, h5_file_path, app_name=None, measurement_name=measurement.name)

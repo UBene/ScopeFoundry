@@ -19,6 +19,7 @@ D = data_set
     - time_id = # unix epoch timestamp
     - unique_id = # persistent identifer for dataset, 26 character
     - uuid = # uuid string representation of unique_id
+    - measurement = measurement_run_for_datasets
     * git
         - project_commit_hash = # full commit hash of user project
         - project_short_hash = # short commit hash of user project
@@ -50,9 +51,9 @@ D = data_set
                     - log_quant_1 = '[n_m]'
         * ...
     * measurement
-        * measurement_1
+        * measurement_run_for_datasets 
             - ScopeFoundry_Type = Measurement
-            - name = measurement_1
+            - name = measurement_run_for_datasets
                 * settings
                     - log_quant_1
                     - ...
@@ -60,6 +61,15 @@ D = data_set
                         - log_quant_1 = '[n_m]'
             D simple_data_set_2
             D ...
+        * measurement_2 (maybe run nested, however its datasets are not included)
+            - ScopeFoundry_Type = Measurement
+            - name = measurement_2
+                * settings
+                    - log_quant_1
+                    - ...
+                    * units
+                        - log_quant_1 = '[n_m]'
+        * ...
 
 other thoughts:
     DONE store git revision of code (implemented in /git group)
@@ -81,7 +91,8 @@ def h5_base_file(
     root.attrs["time_id"] = int(dataset_metadata.t0)
     root.attrs["unique_id"] = dataset_metadata.unique_id
     root.attrs["uuid"] = str(dataset_metadata.u)
-    
+    root.attrs["measurement"] = str(dataset_metadata.measurement_name)
+
     # Add git information in dedicated /git group
     try:
         git_group = root.create_group("git")
@@ -96,6 +107,7 @@ def h5_base_file(
 
     h5_save_app_lq(app, root)
     h5_save_hardware_lq(app, root)
+    h5_save_all_measurements_lq(app, root, exclude=measurement)
     return h5_file
 
 
@@ -117,6 +129,16 @@ def h5_save_hardware_lq(app, h5group: h5py.Group) -> None:
         h5_hc_settings_group = h5_hc_group.create_group("settings")
         h5_save_lqcoll_to_attrs(hc.settings, h5_hc_settings_group)
     return h5_hardware_group
+
+
+def h5_save_all_measurements_lq(app, h5group: h5py.Group, exclude=None) -> None:
+    """save settings of every measurement registered on *app*,
+    skipping *exclude* (the measurement whose group is created separately)"""
+    for m_name, m in app.measurements.items():
+        if exclude is not None and m_name == exclude.name:
+            continue
+        h5_meas_group = h5group.require_group(f"measurement/{m_name}")
+        h5_save_measurement_settings(m, h5_meas_group)
 
 
 def h5_save_lqcoll_to_attrs(settings, h5group: h5py.Group) -> None:
@@ -145,6 +167,8 @@ def h5_create_measurement_group(
 ) -> h5py.Group:
     if group_name is None:
         group_name = "measurement/" + measurement.name
+    if group_name in h5group:
+        return h5group[group_name]
     h5_meas_group = h5group.create_group(group_name)
     h5_save_measurement_settings(measurement, h5_meas_group)
     return h5_meas_group
@@ -377,6 +401,7 @@ def _settings_visitfunc(name: str, node: h5py.Group, settings: Dict[str, Any]) -
         lq_path = f"{name.replace('settings', key)}"
         settings[lq_path] = val
 
+
 def load_non_settings_attrs(fname: str) -> Dict[str, Any]:
     path = Path(fname)
     if not path.suffix == ".h5":
@@ -391,6 +416,7 @@ def load_non_settings_attrs(fname: str) -> Dict[str, Any]:
         file.visititems(visit_func)
 
     return attrs
+
 
 def _non_settings_attrs_visitfunc(
     name: str, node: h5py.Group, attrs: Dict[str, Any]
