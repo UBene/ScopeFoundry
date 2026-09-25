@@ -99,6 +99,7 @@ class LQCollection:
         spinbox_step: float = 0.1,
         colors=None,
         protected: bool = False,  # a guard that prevents from being updated, i.e. file loading
+        requires_connection: bool = False,  # only writable once hardware is connected, e.g. when loading settings from file it will be set after connection is set.
         is_dir: bool = False,
         default_dir: str = None,
         file_filters=(),
@@ -132,6 +133,7 @@ class LQCollection:
                 "fmt": fmt,
                 "description": description,
                 "protected": protected,
+                "requires_connection": requires_connection,
             }
         )
 
