@@ -290,6 +290,13 @@ class BaseApp(QtCore.QObject):
         """
         updates settings based on a dictionary.
 
+        writes happen in three phases so that hardware connects only after its
+        other settings (e.g. com port) are applied, and settings flagged
+        requires_connection (e.g. remote values only settable once connected)
+        are written only once connection has been made:
+        1) all regular settings, 2) "connected" settings, 3) settings flagged
+        requires_connection.
+
         ==============  =========  ====================================================================================
         **Arguments:**  **Type:**  **Description:**
         settings        dict       (path, value) map
@@ -297,7 +304,19 @@ class BaseApp(QtCore.QObject):
         """
         report = {}
         error_msgs = {}
+        connect_settings = {}
+        deferred = {}
         for path, value in settings.items():
+            lq = self.get_lq(path)
+            if path.endswith("connected"):
+                connect_settings[path] = value
+            elif lq is not None and getattr(lq, "requires_connection", False):
+                deferred[path] = value
+            else:
+                report[path] = self.write_setting_safe(path, value, error_msgs)
+        for path, value in connect_settings.items():
+            report[path] = self.write_setting_safe(path, value, error_msgs)
+        for path, value in deferred.items():
             report[path] = self.write_setting_safe(path, value, error_msgs)
         return report, error_msgs
 
