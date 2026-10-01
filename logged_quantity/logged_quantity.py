@@ -12,7 +12,6 @@ from qtpy import QtCore, QtGui, QtWidgets
 from ScopeFoundry.helper_funcs import QLock, bool2str, get_logger_from_class, str2bool
 from ScopeFoundry.widgets import MinMaxQSlider
 
-
 tick_path = Path(__file__).parent / "tick.png"
 
 
@@ -62,6 +61,10 @@ class LoggedQuantity(QtCore.QObject):
 
     # signal sent when value has been updated
     updated_value = QtCore.Signal((float,), (int,), (bool,), (), (str,))
+    # signal sent when a widget changes the value
+    updated_value_ui = QtCore.Signal(
+        (float,), (int,), (bool,), (), (str,), (str, object, object)
+    )
     # signal sent when value has been updated, sends text representation
     updated_text_value = QtCore.Signal(str)
     # emits the index of the value in self.choices
@@ -157,6 +160,7 @@ class LoggedQuantity(QtCore.QObject):
 
         self.widget_list = []
         self.listeners = []
+        self.ui_listeners = []
 
         # threading lock
         self.lock = QLock(mode=1)  # mode 0 is non-reentrant lock
@@ -249,7 +253,12 @@ class LoggedQuantity(QtCore.QObject):
     @QtCore.Slot(bool)
     @QtCore.Slot()
     def update_value(
-        self, new_val=None, update_hardware=True, send_signal=True, reread_hardware=None
+        self,
+        new_val=None,
+        update_hardware=True,
+        send_signal=True,
+        reread_hardware=None,
+        _from_ui=False,
     ):
         """
         Update stored value with new_val
@@ -272,6 +281,8 @@ class LoggedQuantity(QtCore.QObject):
         # use a thread lock during update_value to avoid another thread
         # calling update_value during the update_value
 
+        source_is_ui = _from_ui or isinstance(self.sender(), QtWidgets.QWidget)
+
         if reread_hardware is None:
             # if undefined, default to stored reread_from_hardware_after_write bool
             reread_hardware = self.reread_from_hardware_after_write
@@ -285,6 +296,7 @@ class LoggedQuantity(QtCore.QObject):
                     new_val = self.sender().text()
 
             self.oldval = self.coerce_to_type(self.val)
+            ui_old_value = self.oldval
             new_val = self.coerce_to_type(new_val)
 
             self.log.debug(
@@ -299,8 +311,10 @@ class LoggedQuantity(QtCore.QObject):
             #     self.log.debug(f"{self.path}: different values {self.oldval} {new_val}")
 
             # actually change internal state value and store prev. values
-            self.prev_vals.appendleft(self.val)
+            if source_is_ui:
+                self.prev_vals.appendleft(self.val)
             self.val = new_val
+            ui_new_value = self.val
 
         # Read from Hardware
         if update_hardware and self.hardware_set_func:
@@ -309,7 +323,23 @@ class LoggedQuantity(QtCore.QObject):
                 self.read_from_hardware(send_signal=False)
         # Send Qt Signals
         if send_signal:
+            if source_is_ui:
+                self.send_ui_display_updates(ui_old_value, ui_new_value)
             self.send_display_updates()
+
+    def send_ui_display_updates(self, old_value=None, new_value=None):
+        """Emit signals only for changes that originated in a UI widget."""
+        self.updated_value_ui[(str, object, object)].emit(
+            self.path, old_value, new_value
+        )
+        self.updated_value_ui[()].emit()
+        self.updated_value_ui[str].emit(self.string_value())
+        if getattr(self, "is_array", False):
+            return
+        if self.dtype in [float, int]:
+            self.updated_value_ui[float].emit(self.val)
+            self.updated_value_ui[int].emit(int(self.val))
+        self.updated_value_ui[bool].emit(bool(self.val))
 
     def send_display_updates(self, force=False):
         """
@@ -373,7 +403,10 @@ class LoggedQuantity(QtCore.QObject):
         return str(self.val)
 
     def update_choice_index_value(self, new_choice_index, **kwargs):
-        self.update_value(self.choices[new_choice_index][1], **kwargs)
+        source_is_ui = isinstance(self.sender(), QtWidgets.QWidget)
+        self.update_value(
+            self.choices[new_choice_index][1], _from_ui=source_is_ui, **kwargs
+        )
 
     def add_listener(self, func, argtype=(), **kwargs):
         """
@@ -399,6 +432,19 @@ class LoggedQuantity(QtCore.QObject):
 
         self.updated_value[argtype].connect(func, **kwargs)
         self.listeners.append(func)
+
+    def add_listener_ui(self, func, argtype=(), **kwargs):
+        """Listen only for value changes received from a Qt widget.
+
+        Use ``argtype=(str, object, object)`` to receive the old and new values.
+        """
+        self.updated_value_ui[argtype].connect(func, **kwargs)
+        self.ui_listeners.append(func)
+
+    def remove_listener_ui(self, func, argtype=()):
+        """Disconnect a UI-only listener previously added with add_listener_ui."""
+        self.updated_value_ui[argtype].disconnect(func)
+        self.ui_listeners.remove(func)
 
     def change_readonly_on(self, other_lq, func=bool):
         """
@@ -554,7 +600,7 @@ class LoggedQuantity(QtCore.QObject):
 
                 @QtCore.Slot(int)
                 def update_lq(x):
-                    self.update_value(transform_from_slider(x))
+                    self.update_value(transform_from_slider(x), _from_ui=True)
 
                 widget.setSingleStep(1)
                 self.updated_value[float].connect(update_widget_value)
@@ -605,7 +651,7 @@ class LoggedQuantity(QtCore.QObject):
                 self.log.debug(f"{self.path} qLineEdit on_edit_finished")
                 try:
                     widget.blockSignals(True)
-                    self.update_value(widget.text())
+                    self.update_value(widget.text(), _from_ui=True)
                 finally:
                     widget.blockSignals(False)
 
@@ -626,7 +672,7 @@ class LoggedQuantity(QtCore.QObject):
             def on_widget_textChanged():
                 try:
                     widget.blockSignals(True)
-                    self.update_value(widget.toPlainText())
+                    self.update_value(widget.toPlainText(), _from_ui=True)
                 finally:
                     widget.blockSignals(False)
 
@@ -644,7 +690,7 @@ class LoggedQuantity(QtCore.QObject):
             def on_text_changed(x=None):
                 try:
                     widget.blockSignals(True)
-                    self.update_value(widget.toPlainText())
+                    self.update_value(widget.toPlainText(), _from_ui=True)
                 finally:
                     widget.blockSignals(False)
 
@@ -727,7 +773,7 @@ class LoggedQuantity(QtCore.QObject):
             self.updated_value[float].connect(update_widget_value)
 
             def on_widget_update(_widget):
-                self.update_value(_widget.value())
+                self.update_value(_widget.value(), _from_ui=True)
 
             widget.sigValueChanged.connect(on_widget_update)
 
@@ -1377,7 +1423,7 @@ class LoggedQuantity(QtCore.QObject):
             self.updated_value[self.dtype].connect(
                 update_param
             )  # (lambda v, p=p: p.setValue(v))
-            p.sigValueChanged.connect(lambda p, v: self.update_value(v))
+            p.sigValueChanged.connect(lambda p, v: self.update_value(v, _from_ui=True))
 
             return p
         if self.is_array:
@@ -1397,7 +1443,7 @@ class LoggedQuantity(QtCore.QObject):
             self.updated_value[self.dtype].connect(
                 update_param
             )  # (lambda v, p=p: p.setValue(v))
-            p.sigValueChanged.connect(lambda p, v: self.update_value(v))
+            p.sigValueChanged.connect(lambda p, v: self.update_value(v, _from_ui=True))
 
             return p
 
