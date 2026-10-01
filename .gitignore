@@ -3,3 +3,5 @@ __pycache__/
 .pydevproject
 tools/tools_defaults.ini
 ScopeFoundry.egg-info
+/profiles/history/
+**/__**.md
