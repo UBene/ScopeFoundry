@@ -83,6 +83,7 @@ class ArrayLQ(LoggedQuantity):
 
         self.widget_list = []
         self.listeners = []
+        self.ui_listeners = []
 
         # threading lock
         self.lock = QLock(mode=0)  # mode 0 is non-reentrant lock
