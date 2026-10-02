@@ -19,7 +19,6 @@ D = data_set
     - time_id = # unix epoch timestamp
     - unique_id = # persistent identifer for dataset, 26 character
     - uuid = # uuid string representation of unique_id
-    - measurement = measurement_run_for_datasets
     * git
         - project_commit_hash = # full commit hash of user project
         - project_short_hash = # short commit hash of user project
@@ -50,10 +49,17 @@ D = data_set
                 * units
                     - log_quant_1 = '[n_m]'
         * ...
-    * measurement
-        * measurement_run_for_datasets 
+    * other_measurements_settings
+        * measurement_2 (settings of measurements other than the one that created the file)
             - ScopeFoundry_Type = Measurement
-            - name = measurement_run_for_datasets
+            - name = measurement_2
+            * settings
+                - log_quant_1
+                - ...
+    * measurement
+        * root_measurement_name 
+            - ScopeFoundry_Type = Measurement
+            - name = root_measurement_name
                 * settings
                     - log_quant_1
                     - ...
@@ -61,14 +67,13 @@ D = data_set
                         - log_quant_1 = '[n_m]'
             D simple_data_set_2
             D ...
-        * measurement_2 (maybe run nested, however its datasets are not included)
-            - ScopeFoundry_Type = Measurement
-            - name = measurement_2
-                * settings
-                    - log_quant_1
-                    - ...
-                    * units
-                        - log_quant_1 = '[n_m]'
+    * other_measurements_settings
+        - name = measurement_2
+            * settings
+                - log_quant_1
+                - ...
+                * units
+                    - log_quant_1 = '[n_m]'
         * ...
 
 other thoughts:
@@ -76,6 +81,9 @@ other thoughts:
     DONE store git revision of ScopeFoundry (implemented in /git group)
     EMD compatibility, NeXUS compatibility
 """
+
+
+OTHER_MEASUREMENTS_GROUP = "other_measurements_settings"
 
 
 def h5_base_file(
@@ -91,7 +99,6 @@ def h5_base_file(
     root.attrs["time_id"] = int(dataset_metadata.t0)
     root.attrs["unique_id"] = dataset_metadata.unique_id
     root.attrs["uuid"] = str(dataset_metadata.u)
-    root.attrs["measurement"] = str(dataset_metadata.measurement_name)
 
     # Add git information in dedicated /git group
     try:
@@ -137,7 +144,7 @@ def h5_save_all_measurements_lq(app, h5group: h5py.Group, exclude=None) -> None:
     for m_name, m in app.measurements.items():
         if exclude is not None and m_name == exclude.name:
             continue
-        h5_meas_group = h5group.require_group(f"measurement/{m_name}")
+        h5_meas_group = h5group.require_group(f"{OTHER_MEASUREMENTS_GROUP}/{m_name}")
         h5_save_measurement_settings(m, h5_meas_group)
 
 
@@ -394,12 +401,16 @@ def load_settings(fname: str) -> None:
 
 
 def _settings_visitfunc(name: str, node: h5py.Group, settings: Dict[str, Any]) -> None:
-    if not name.endswith("settings"):
+    parts = name.split("/")
+    if parts[-1] != "settings":
         return
 
+    # other measurements are exposed as measurement/<measure_name>/<setting_name>
+    if len(parts) == 3 and parts[0] == OTHER_MEASUREMENTS_GROUP:
+        parts[0] = "measurement"
+
     for key, val in node.attrs.items():
-        lq_path = f"{name.replace('settings', key)}"
-        settings[lq_path] = val
+        settings["/".join(parts[:-1] + [key])] = val
 
 
 def load_non_settings_attrs(fname: str) -> Dict[str, Any]:

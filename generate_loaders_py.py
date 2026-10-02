@@ -93,7 +93,7 @@ def get_measurement_name(fname: str) -> str:
     with h5py.File(fname, "r") as file:
         if len(file["measurement"].keys()) == 1:
             return list(file["measurement"].keys())[0]
-        return file.attrs["measurement"]
+        return file.attrs.get("measurement", "root_measurement_name_unknown")
 
 
 def load(fname: str) -> Any:
@@ -128,14 +128,17 @@ def find_settings(settings: Dict, pattern: str = "measurement/*") -> Dict:
         return {}
     return {k: settings[k] for k in matching}
 
-
+OTHER_MEASUREMENTS_GROUP = "other_measurements_settings"
 def _settings_visitfunc(name: str, node: h5py.Group, settings: Dict[str, Any]) -> None:
-    if not name.endswith("settings"):
+    parts = name.split("/")
+    if parts[-1] != "settings":
         return
 
+    if len(parts) == 3 and parts[0] == OTHER_MEASUREMENTS_GROUP:
+        parts[0] = "measurement"
+
     for key, val in node.attrs.items():
-        lq_path = f"{name.replace('settings', key)}"
-        settings[lq_path] = val
+        settings["/".join(parts[:-1] + [key])] = val
 
 def load_non_settings_attrs(fname: str) -> Dict[str, Any]:
     path = Path(fname)
@@ -161,12 +164,6 @@ def _non_settings_attrs_visitfunc(
     for key, val in node.attrs.items():
         lq_path = f"{name}/{key}"
         attrs[lq_path] = val
-
-def get_mm_name(fname: str) -> str:
-    with h5py.File(fname, "r") as file:
-        if len(file["measurement"].keys()) == 1:
-            return list(file["measurement"].keys())[0]
-        return file.attrs["measurement"]
 """
 __STR__INFO = r"""
 
@@ -198,13 +195,11 @@ DICT_STYLE_METHODS = r"""
 """
 
 
-def get_measurement_name(fname: Union[str, Path]) -> str:
+def get_measurement_name(fname: str) -> str:
     with h5py.File(fname, "r") as file:
-        if "measurement" in file.attrs:
-            mm_name = file.attrs["measurement"]
-        else:
-            mm_name = list(file["measurement"].keys())[0]
-    return str(mm_name)
+        if len(file["measurement"].keys()) == 1:
+            return list(file["measurement"].keys())[0]
+        return file.attrs.get("measurement", "root_measurement_name_unknown")
 
 
 def generate_loaders(dsets: Dict[str, Dict[str, bool]]) -> List[str]:
