@@ -36,6 +36,7 @@ from ScopeFoundry.logged_quantity import LoggedQuantity, LQCollection
 from ScopeFoundry.operations import Operation, Operations
 
 from .base_app import BaseApp
+from .profile_manager import ProfileManager
 
 # useful for developing - may cause problems:
 from .base_microscope_app_mdi import Ui_MainWindow
@@ -86,6 +87,7 @@ class BaseMicroscopeApp(BaseApp):
         # objects to overwrite and populate with setup function.
         self.hardware: Dict[str, HardwareProtocol] = OrderedAttrDict()
         self.measurements: Dict[str, MeasurementProtocol] = OrderedAttrDict()
+        self.profile_manager = ProfileManager(self)
         self.logo_path = str(self.icons_path / "scopefoundry_logo2B_1024.png")
         self.quickbar = None  # also with self.add_quickbar
         self.docs_path = get_child_path(self) / "docs"
@@ -102,6 +104,7 @@ class BaseMicroscopeApp(BaseApp):
         self._setup_ui_logo()
         self._add_docs_to_help_menu()
         self._init_py_analysis_directory()
+        self.profile_manager.initialize_startup_profile()
 
         # self.snippets = {}
         # self.descriptive_snippets = ()
@@ -113,6 +116,75 @@ class BaseMicroscopeApp(BaseApp):
     def setup_ui(self) -> None:
         """Optional override to set up ui elements after default ui is built"""
         pass
+
+    def add_setting_path(self, lq: LoggedQuantity) -> None:
+        super().add_setting_path(lq)
+        profile_action_text = "Save current value to profile..."
+        remove_profile_action_text = "Remove saved value from profile..."
+        if (
+            not lq.ro
+            and not lq.protected
+            and not any(
+                len(action) >= 2 and action[-2] == profile_action_text
+                for action in lq.actions
+            )
+        ):
+            lq.actions.append(
+                (
+                    profile_action_text,
+                    partial(self._save_lq_value_to_profile, lq.path),
+                )
+            )
+        if (
+            not lq.ro
+            and not lq.protected
+            and not any(
+                len(action) >= 2 and action[-2] == remove_profile_action_text
+                for action in lq.actions
+            )
+        ):
+            lq.actions.append(
+                (
+                    remove_profile_action_text,
+                    partial(self._remove_lq_value_from_profile, lq.path),
+                )
+            )
+        if not lq.ro and self._save_ui_lq_change_snapshot not in lq.ui_listeners:
+            lq.add_listener_ui(
+                self._save_ui_lq_change_snapshot, argtype=(str, object, object)
+            )
+
+    def _save_lq_value_to_profile(self, path: str, checked: bool = False) -> None:
+        profile_manager = getattr(self, "profile_manager", None)
+        if profile_manager is not None:
+            profile_manager.save_setting_to_profile(path)
+
+    def _remove_lq_value_from_profile(self, path: str, checked: bool = False) -> None:
+        profile_manager = getattr(self, "profile_manager", None)
+        if profile_manager is not None:
+            profile_manager.remove_setting_from_profile(path)
+
+    def remove_setting_path(self, lq: LoggedQuantity) -> None:
+        if self._save_ui_lq_change_snapshot in lq.ui_listeners:
+            lq.remove_listener_ui(
+                self._save_ui_lq_change_snapshot, argtype=(str, object, object)
+            )
+        super().remove_setting_path(lq)
+
+    @QtCore.Slot(str, object, object)
+    def _save_ui_lq_change_snapshot(
+        self, path: str, old_value: Any, new_value: Any
+    ) -> None:
+        if path.endswith("/activation") and path.startswith("mm/"):
+            mm = path.split("/")[1]
+            if new_value:
+                self.profile_manager.history.save_snapshot(f"{mm} started")
+            else:
+                self.profile_manager.history.save_snapshot(f"{mm} stopped")
+        else:
+            self.profile_manager.history.save_snapshot(
+                f"{path} {old_value} -> {new_value}"
+            )
 
     def _setup_settings_operations(self, **kwargs: Any) -> None:
         initial_save_path = Path.cwd() / "data"
@@ -316,6 +388,7 @@ class BaseMicroscopeApp(BaseApp):
         self.ui.action_about.triggered.connect(self.on_about)
         # Refer to existing ui object:
         self.menubar = self.ui.menuWindow
+        self.profile_manager.setup_menu(self.ui.menubar)
 
         self.ui.menuAdvanced.addAction(
             "new hardware", partial(self.start_tools, "new hardware")
@@ -367,15 +440,10 @@ class BaseMicroscopeApp(BaseApp):
         scroll_area = self.ui.quickaccess_scrollArea
 
         def update_quickaccess_width():
-            """Update the width of quickaccess content to match viewport"""
             if scroll_area.widget() is not None:
-                # Get the actual viewport width
                 viewport_width = scroll_area.viewport().width()
-
-                # Set the content widget size to match viewport exactly
                 scroll_area.widget().setFixedWidth(viewport_width)
 
-        # Override resize event
         original_resize = scroll_area.resizeEvent
 
         def quickaccess_resize_event(event):
@@ -383,18 +451,11 @@ class BaseMicroscopeApp(BaseApp):
             update_quickaccess_width()
 
         scroll_area.resizeEvent = quickaccess_resize_event
-
-        # Also connect to splitter moved signal
         self.ui.col_splitter.splitterMoved.connect(update_quickaccess_width)
-
-        # Apply initial width fix
         update_quickaccess_width()
 
     def _adjust_quickaccess_scroll_area_size_policies(self) -> None:
-        # Fix horizontal scrolling: ensure content widget width matches viewport width
         scroll_area = self.ui.quickaccess_scrollArea
-
-        # Override problematic UI file settings
         scroll_area.setHorizontalScrollBarPolicy(
             QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
@@ -405,8 +466,6 @@ class BaseMicroscopeApp(BaseApp):
             QtWidgets.QSizePolicy.Policy.Maximum,
             QtWidgets.QSizePolicy.Policy.Preferred,
         )
-
-        # Fix content widget size policy
         if scroll_area.widget() is not None:
             scroll_area.widget().setSizePolicy(
                 QtWidgets.QSizePolicy.Policy.Maximum,
@@ -421,7 +480,6 @@ class BaseMicroscopeApp(BaseApp):
 
     def show(self) -> None:
         """Tells Qt to show the user interface"""
-        # self.ui.exec_()
         self.ui.show()
 
     def __del__(self) -> None:
@@ -436,19 +494,18 @@ class BaseMicroscopeApp(BaseApp):
         self.ui.mdiArea.setViewMode(QtWidgets.QMdiArea.ViewMode.TabbedView)
 
     def tile_layout(self) -> None:
-        """Tiles subwindows in user interface. Specifically in the Multi Document Interface."""
+        """Tiles subwindows in user interface."""
         self.set_subwindow_mode()
         self.ui.mdiArea.tileSubWindows()
 
     def cascade_layout(self) -> None:
-        """Cascades subwindows in user interface. Specifically in the Multi Document Interface."""
+        """Cascades subwindows in user interface."""
         self.set_subwindow_mode()
         self.ui.mdiArea.cascadeSubWindows()
 
     def bring_measure_ui_to_front(self, measure: MeasurementProtocol) -> None:
         ui = self._loaded_measure_uis.get(measure.name, None)
         if ui is None:
-            # measure also has no subwin
             return
         if self.mdi:
             self.bring_mdi_subwin_to_front(measure.subwin)
@@ -483,14 +540,12 @@ class BaseMicroscopeApp(BaseApp):
     def add_mdi_subwin(
         self, widget: QtWidgets.QWidget, name: str, color: QtGui.QColor = None
     ) -> QtWidgets.QMdiSubWindow:
-        mdiArea: QtWidgets.QMdiArea = self.ui.mdiArea
-
+        mdi_area: QtWidgets.QMdiArea = self.ui.mdiArea
         scroll = QtWidgets.QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(widget)
         scroll.setMinimumSize(0, 0)
-
-        subwin = mdiArea.addSubWindow(
+        subwin = mdi_area.addSubWindow(
             scroll,
             QtCore.Qt.WindowType.CustomizeWindowHint
             | QtCore.Qt.WindowType.WindowTitleHint
@@ -500,8 +555,6 @@ class BaseMicroscopeApp(BaseApp):
         ignore_on_close(subwin)
         subwin.setWindowTitle(name)
         subwin.setWindowIcon(widget.windowIcon())
-
-        # subwin.setParent(self.ui.mdiArea)
         subwin.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.MinimumExpanding,
             QtWidgets.QSizePolicy.Policy.MinimumExpanding,
@@ -519,7 +572,7 @@ class BaseMicroscopeApp(BaseApp):
 
     def on_close(self) -> None:
         self.log.info("on_close")
-        # disconnect all hardware objects
+        self.profile_manager.history.save_snapshot("Application closing")
         for hw in self.hardware.values():
             self.log.info(f"disconnecting {hw.name}")
             try:
@@ -531,15 +584,12 @@ class BaseMicroscopeApp(BaseApp):
     def on_analyze_with_ipynb(self, folder: str = None) -> Path:
         if folder is None:
             folder = self.settings["save_dir"]
-
         loaders_fname, dset_names = generate_loaders_py(folder)
-
         ipynb_path = update_ipynb(
             folder,
             snippets=self.get_snippets(),
             descriptive_snippets=(),
         )
-
         print("")
         print("generated", loaders_fname, f"with {len(dset_names)} loader(s)")
         print("")
@@ -547,28 +597,24 @@ class BaseMicroscopeApp(BaseApp):
         print("")
         if ipynb_path.exists():
             open_file(ipynb_path)
-
         folder = Path(folder)
-        # t0 = time.perf_counter()
-        for m in list(self.measurements.values()) + [self]:
-            print(m.name)
-            for source in m.get_py_analysis_scripts():
+        for measurement in list(self.measurements.values()) + [self]:
+            print(measurement.name)
+            for source in measurement.get_py_analysis_scripts():
                 target_path = folder / source.name
                 if not target_path.exists():
                     copyfile(source, target_path)
-        # t1 = time.perf_counter()
-        # print(f"copied analysis scripts in {t1-t0:.2f} seconds")
         return ipynb_path
 
     def get_snippets(self) -> Dict[str, str]:
         snippets = {}
         for name, measure in self.measurements.items():
             try:
-                s = measure.get_py_snippet()
-                if isinstance(s, str):
-                    snippets[name] = s
+                snippet = measure.get_py_snippet()
+                if isinstance(snippet, str):
+                    snippets[name] = snippet
                 else:
-                    snippets[name] = f"{name}.get_py_snippet returned: {repr(s)}"
+                    snippets[name] = f"{name}.get_py_snippet returned: {repr(snippet)}"
             except Exception as err:
                 self.log.error(f"Error getting snippet for {name}: {err}")
         return snippets
@@ -579,31 +625,20 @@ class BaseMicroscopeApp(BaseApp):
                 hw.read_from_hardware()
 
     def add_hardware(self, hw: HardwareProtocol) -> HardwareProtocol:
-        """Loads a HardwareComponent object into the app.
-
-        If *hw* is a class, rather an instance, create an instance
-        and add it to self.hardware
-        """
-        # If *hw* is a class, rather an instance, create an instance
+        """Loads a HardwareComponent object into the app."""
         if inspect.isclass(hw):
             hw = hw(app=self)
-
         hw.color = auto_color(hw)
-
         if hw.name in self.hardware.keys():
             raise ValueError(
                 f"Hardware '{hw.name}' already exists. Remove it first with app.remove_hardware('{hw.name}')"
             )
-
         self.hardware.add(hw.name, hw)
-
         self.add_lq_collection_to_settings_path(hw.settings)
-
         if hasattr(self, "hw_tree"):
             from ScopeFoundry.dynamical_widgets.tree_widget import SubtreeManager
 
             SubtreeManager(self.hw_tree, hw)
-
         return hw
 
     def add_hardware_component(self, hw: HardwareProtocol) -> HardwareProtocol:
@@ -614,36 +649,23 @@ class BaseMicroscopeApp(BaseApp):
         if name not in self.hardware:
             self.log.warning(f"Hardware {name} not found")
             return
-
         hw = self.hardware[name]
-
         if hw.is_connected:
             self.log.info(f"Disconnecting {name} before removal")
             hw.settings["connected"] = False
-
         for subtree_manager in list(hw._subtree_managers_):
             subtree_manager.cleanup()
         hw._subtree_managers_.clear()
-
         for widget_manager in list(hw._widgets_managers_):
             if hasattr(widget_manager, "deleteLater"):
                 widget_manager.deleteLater()
         hw._widgets_managers_.clear()
-
         self.remove_lq_collection_from_settings_path(hw.settings)
-
         del self.hardware[name]
-
         self.log.info(f"Hardware {name} removed")
 
     def add_measurement(self, measure: MeasurementProtocol) -> MeasurementProtocol:
-        """Loads a Measurement object into the app.
-
-        If *measure* is a class, rather an instance, create an instance
-        and add it to self.measurements
-
-        """
-        # If *measure* is a class, rather an instance, create an instance
+        """Loads a Measurement object into the app."""
         if inspect.isclass(measure):
             measure = measure(app=self)
 
@@ -727,7 +749,6 @@ class BaseMicroscopeApp(BaseApp):
         self.remove_lq_collection_from_settings_path(measure.settings)
 
         del self.measurements[name]
-
         self.log.info(f"Measurement {name} removed")
 
     def add_favorites(
@@ -791,6 +812,28 @@ class BaseMicroscopeApp(BaseApp):
         elif fname.suffix == ".h5":
             self.settings_load_h5(fname)
 
+    def read_settings_file(
+        self, fname: Path, expected_suffix: str = None
+    ) -> Dict[str, Any]:
+        """Read an INI or HDF5 settings file without applying its values."""
+        fname = Path(fname)
+        suffix = (expected_suffix or fname.suffix).lower()
+        if suffix == ".ini":
+            return ini_io.load_settings(fname)
+        if suffix == ".h5":
+            settings = h5_io.load_settings(fname)
+            for key in ("ScopeFoundry_version", "time_id", "unique_id", "uuid"):
+                settings.pop(key, None)
+            return settings
+        raise ValueError("Choose an INI or HDF5 (.h5) settings file.")
+
+    def settings_select_file_dialog(self) -> str:
+        """Open the standard settings file picker and return its selection."""
+        fname, _selected_filter = QtWidgets.QFileDialog.getOpenFileName(
+            self.ui, "Open Settings file", "", "Settings File (*.ini *.h5)"
+        )
+        return fname
+
     def settings_load_ini(
         self, fname: str, ignore_hw_connect: bool = False, show_report: bool = True
     ) -> None:
@@ -800,7 +843,7 @@ class BaseMicroscopeApp(BaseApp):
         fname           str        relative path to the filename of the ini file.
         ==============  =========  ==============================================
         """
-        settings = ini_io.load_settings(fname)
+        settings = self.read_settings_file(fname, ".ini")
 
         if ignore_hw_connect:
             settings = {
@@ -815,22 +858,6 @@ class BaseMicroscopeApp(BaseApp):
         self.propose_settings_values(Path(fname).name, settings)
         self.log.info(f"settings loaded from {fname}")
 
-    def settings_load_file_threaded(self, fname: str) -> None:
-        """Loads settings from a file in a separate thread to avoid blocking the UI.
-
-        Currently only supports ini files.
-        """
-        from threading import Thread
-
-        def task():
-            self.settings_load_file(fname)
-
-        def on_finished():
-            self.log.info(f"Finished loading settings from {fname}")
-
-        threaded_task = Thread(target=task)
-        threaded_task.start()
-
     def settings_load_h5(
         self, fname: str, ignore_hw_connect: bool = False, show_report: bool = True
     ) -> None:
@@ -842,13 +869,7 @@ class BaseMicroscopeApp(BaseApp):
         fname           str        relative path to the filename of the h5 file.
         ==============  =========  ====================================================================================
         """
-        settings = h5_io.load_settings(fname)
-
-        # ignoring some metadata that are not settings. Maybe should be excluded in h5_io.load_settings
-        for x in ("ScopeFoundry_version", "time_id", "unique_id", "uuid"):
-            if x in settings:
-                # print("ignoring", x)
-                settings.pop(x)
+        settings = self.read_settings_file(fname, ".h5")
 
         if ignore_hw_connect:
             settings = {
@@ -872,6 +893,7 @@ class BaseMicroscopeApp(BaseApp):
             / f"{datetime.datetime.now():%y%m%d_%H%M%S}_settings.ini"
         )
         self.settings_save_ini(fname)
+        self.profile_manager.history.save_snapshot("Settings autosaved")
 
     def settings_load_last(self) -> None:
         """
@@ -889,12 +911,13 @@ class BaseMicroscopeApp(BaseApp):
         if fname:
             self.settings_save_ini(fname)
 
-    def settings_load_dialog(self) -> None:
-        """Opens a load ini dialogue in the app user interface"""
-        fname, selectedFilter = QtWidgets.QFileDialog.getOpenFileName(
-            self.ui, "Open Settings file", "", "Settings File (*.ini *.h5)"
-        )
+    def settings_load_dialog(self) -> str:
+        """Select and load a settings file using the standard file picker."""
+        fname = self.settings_select_file_dialog()
+        if not fname:
+            return ""
         self.settings_load_file(fname)
+        return fname
 
     def get_operation(self, path: str) -> Operation:
         parts = path.split("/")
@@ -1146,10 +1169,7 @@ class BaseMicroscopeApp(BaseApp):
         path = Path(fname)
         if not path.exists() or path.suffix not in (".ini", ".h5"):
             return
-        if path.suffix == ".ini":
-            settings = ini_io.load_settings(path)
-        elif path.suffix == ".h5":
-            settings = h5_io.load_settings(path)
+        settings = self.read_settings_file(path)
         self.propose_settings_values(path.name, settings)
 
     def launch_browser(self, url: str) -> None:
