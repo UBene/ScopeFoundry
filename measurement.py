@@ -445,11 +445,20 @@ class Measurement:
         last_polling = time.time()
 
         # Now that it is running, wait until done
+        t_interrupt = None
+        hard_interrupted = False
         while measure.is_measuring():
             if self.interrupt_measurement_called and never_interrupt_measure == False:
-                # print('nest outer interrupted', self.interrupt_measurement_called)
-
-                measure.interrupt()
+                measure._interrupt()
+                if t_interrupt is None:
+                    t_interrupt = time.time()
+                # last resort: terminating a QThread can crash mid hardware call
+                elif not hard_interrupted and time.time() - t_interrupt > 5.0:
+                    self.log.warning(
+                        f"{measure.name} did not stop within 5 s, terminating"
+                    )
+                    hard_interrupted = True
+                    measure.interrupt()
 
             if measure.interrupt_measurement_called and nested_interrupt:
                 # THIS IS MAYBE UNSAFE???: measure.interrupt_measurement_called might be also TRUE if measure finished successfully?
@@ -459,7 +468,7 @@ class Measurement:
                     measure.interrupt_measurement_called,
                     self.interrupt_measurement_called,
                 )
-                self.interrupt()
+                self._interrupt()
 
             time.sleep(0.010)
 
