@@ -105,6 +105,7 @@ class Measurement:
         self.progress = self.settings.New(
             "progress", dtype=float, unit="%", si=False, ro=True, protected=True
         )
+        self.progress.add_listener(self.on_change_progress, float)
         self.settings.New(
             "profile",
             dtype=bool,
@@ -305,6 +306,7 @@ class Measurement:
         """
         self.progress.update_value(pct)
 
+    def on_change_progress(self, pct):
         if pct:
             text = f"{self.name} (in {to_etr_str((100 - pct)/pct * (time.time() - self._t0))})"
         else:
