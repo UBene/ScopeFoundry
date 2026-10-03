@@ -6,7 +6,7 @@ from pathlib import Path
 
 from functools import partial
 
-from qtpy import QtWidgets
+from qtpy import QtGui, QtWidgets
 
 from ScopeFoundry import ini_io
 
@@ -25,19 +25,39 @@ class StateHistory:
         self._prune()
         self.history_menu = None
         self.undo_action = None
+        self.redo_action = None
+        self._cursor = None  # entry name of the current state; None means latest
+        self._restoring = False
 
     def setup_menu(self, menu_bar: QtWidgets.QMenuBar) -> None:
         self.history_menu = menu_bar.addMenu("History")
+        self.history_menu.setToolTipsVisible(True)
         self.history_menu.aboutToShow.connect(self.refresh_menu)
         self.undo_action = menu_bar.addAction("Undo")
         self.undo_action.setIcon(
-            self.app.ui.style().standardIcon(
-                QtWidgets.QStyle.StandardPixmap.SP_ArrowBack
-            )
+            self._blue_icon(QtWidgets.QStyle.StandardPixmap.SP_ArrowBack)
         )
         self.undo_action.setShortcut("Ctrl+Z")
         self.undo_action.triggered.connect(self.undo_latest)
+        self.redo_action = menu_bar.addAction("Forward")
+        self.redo_action.setIcon(
+            self._blue_icon(QtWidgets.QStyle.StandardPixmap.SP_ArrowForward)
+        )
+        self.redo_action.setShortcuts(["Ctrl+Y", "Ctrl+Shift+Z"])
+        self.redo_action.triggered.connect(self.redo_latest)
         self.refresh_menu()
+
+    def _blue_icon(self, standard_pixmap) -> QtGui.QIcon:
+        background = self.app.ui.palette().color(QtGui.QPalette.ColorRole.Window)
+        blue = "#0057B8" if background.lightness() > 127 else "#70BFFF"
+        pixmap = self.app.ui.style().standardIcon(standard_pixmap).pixmap(32, 32)
+        painter = QtGui.QPainter(pixmap)
+        painter.setCompositionMode(
+            QtGui.QPainter.CompositionMode.CompositionMode_SourceIn
+        )
+        painter.fillRect(pixmap.rect(), QtGui.QColor(blue))
+        painter.end()
+        return QtGui.QIcon(pixmap)
 
     def _entry_paths(self):
         entries = []
@@ -60,8 +80,13 @@ class StateHistory:
             shutil.rmtree(entry_dir, ignore_errors=True)
 
     def save_snapshot(self, reason: str) -> Path | None:
+        if self._restoring:
+            return None
         try:
-            return self._save_snapshot(self._normalize_reason(reason))
+            entry_dir = self._save_snapshot(self._normalize_reason(reason))
+            self._cursor = None
+            self.refresh_menu()
+            return entry_dir
         except Exception:
             self.app.log.exception("Could not save app history snapshot")
             return None
@@ -117,14 +142,38 @@ class StateHistory:
         self.history_menu.clear()
         entries = self._entry_paths()
         if self.undo_action is not None:
-            self.undo_action.setEnabled(bool(entries))
-            hint = self._history_item_text(entries[-1][1]) if entries else ""
-            self.undo_action.setToolTip(hint)
+            idx = self._undo_index(entries)
+            self.undo_action.setEnabled(idx > 0)
+            hint = self._history_item_text(entries[idx - 1][1]) if idx > 0 else ""
+            self.undo_action.setToolTip(
+                f"Undo (Ctrl+Z): restore {hint}" if hint else "Undo (nothing to undo)"
+            )
             self.undo_action.setStatusTip(hint)
-        for _, entry_dir in reversed(entries):
+        if self.redo_action is not None:
+            idx = self._undo_index(entries)
+            has_next = idx < len(entries) - 1
+            self.redo_action.setEnabled(has_next)
+            hint = self._history_item_text(entries[idx + 1][1]) if has_next else ""
+            self.redo_action.setToolTip(
+                f"Forward (Ctrl+Y): restore {hint}"
+                if hint
+                else "Forward (nothing to redo)"
+            )
+            self.redo_action.setStatusTip(hint)
+        current = self._undo_index(entries)
+        for i, (_, entry_dir) in reversed(list(enumerate(entries))):
             action = self.history_menu.addAction(self._history_item_text(entry_dir))
+            action.setCheckable(True)
+            action.setToolTip(
+                "Current state"
+                if i == current
+                else "Restore settings and window layout of this snapshot"
+            )
+            action.setChecked(i == current)
             action.setData(entry_dir.name)
-            action.triggered.connect(partial(self.restore_snapshot, entry_dir.name))
+            action.triggered.connect(
+                partial(self._on_menu_entry_triggered, entry_dir.name)
+            )
         if not entries:
             self.history_menu.addAction("No history yet").setEnabled(False)
 
@@ -133,28 +182,45 @@ class StateHistory:
         timestamp = datetime.datetime.fromisoformat(metadata["timestamp"])
         return f"{timestamp:%Y-%m-%d %H:%M:%S}  {metadata['reason']}"
 
+    def _undo_index(self, entries) -> int:
+        for i, (_, entry_dir) in enumerate(entries):
+            if entry_dir.name == self._cursor:
+                return i
+        return len(entries) - 1
+
     def undo_latest(self, checked: bool = False) -> None:
         entries = self._entry_paths()
-        if not entries:
+        idx = self._undo_index(entries)
+        if idx <= 0:
             return
-        self.restore_snapshot(entries[-1][1].name)
+        self.restore_snapshot(entries[idx - 1][1].name)
 
-    def restore_snapshot(self, entry_name: str) -> None:
+    def redo_latest(self, checked: bool = False) -> None:
+        entries = self._entry_paths()
+        idx = self._undo_index(entries)
+        if idx >= len(entries) - 1:
+            return
+        self.restore_snapshot(entries[idx + 1][1].name)
+
+    def _on_menu_entry_triggered(self, entry_name: str, checked: bool = False) -> None:
+        self.restore_snapshot(entry_name, restore_window_positions=True)
+
+    def restore_snapshot(
+        self, entry_name: str, restore_window_positions: bool = False
+    ) -> None:
         entry_dir = self.history_dir / entry_name
         settings_path = entry_dir / "settings.ini"
         if not settings_path.is_file():
             return
-        self.app.settings_load_ini(
-            settings_path, ignore_hw_connect=True, show_report=False
-        )
-        positions_path = entry_dir / "window_positions.json"
-        if not positions_path.is_file():
-            return
-        if self.app.mdi:
-            self.app.load_window_positions_json(positions_path)
-            return
-        with open(positions_path, "r") as infile:
-            positions = json.load(infile)
-        geometry = positions.get("main", {}).get("geometry")
-        if geometry:
-            self.app.ui.setGeometry(*geometry)
+        self._restoring = True
+        try:
+            self.app.settings_load_ini(
+                settings_path, ignore_hw_connect=True, show_report=False
+            )
+            positions_path = entry_dir / "window_positions.json"
+            if restore_window_positions and positions_path.is_file():
+                self.app.load_window_positions_json(positions_path)
+        finally:
+            self._restoring = False
+        self._cursor = entry_name
+        self.refresh_menu()
