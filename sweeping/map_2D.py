@@ -55,6 +55,7 @@ class Map2D(Sweep2D):
             icon_path=self.app.qtapp.style().standardIcon(QtWidgets.QStyle.SP_FileIcon),
         )
         self.settings["scan_mode"] = "nested"
+        self.settings["dset_reducer"] = "mean"
         self._current_arrow_lqs = ()
 
     def setup_figure(self):
@@ -120,13 +121,38 @@ class Map2D(Sweep2D):
             imshow_extent = m["imshow_extent"][:]
             dset = m[selected_dset][:]
 
+        img = self.apply_reducer(dset)
+
         x0, x1, y0, y1 = imshow_extent
         rect = QtCore.QRectF(x0, y0, x1 - x0, (y1 - y0))
 
         img_item = self.new_img_item()
-        img = dset.mean(axis=tuple(np.arange(len(dset.shape))[2:]))
-
         img_item.setImage(img, rect=rect)
+
+    def apply_reducer(self, dset):
+        reducer = self.settings["dset_reducer"]
+        if reducer == "None":
+            reducer = self.settings["dset_reducer"] = "mean"
+        if dset.ndim > 2:
+            dset = dset.reshape((*dset.shape[:2], -1))
+            if reducer == "mean":
+                return np.nanmean(dset, axis=-1)
+            elif reducer == "median":
+                return np.nanmedian(dset, axis=-1)
+            elif reducer == "max":
+                return np.nanmax(dset, axis=-1)
+            elif reducer == "min":
+                return np.nanmin(dset, axis=-1)
+            elif reducer == "first":
+                return dset[..., 0]
+            elif reducer == "middle":
+                return dset[..., dset.shape[-1] // 2]
+            elif reducer == "last":
+                return dset[..., -1]
+        elif dset.ndim == 2:
+            return dset
+        else:
+            return dset.reshape((1, -1))
 
     def pre_run(self):
         self.new_img_item()
@@ -139,8 +165,14 @@ class Map2D(Sweep2D):
         plot_layout.setContentsMargins(6, 6, 6, 6)
         plot_layout.setSpacing(4)
         plot_layout.addWidget(
-            self.settings.New_UI(["dataset", "average_over_repetitions"])
+            self.settings.New_UI(
+                [
+                    "dataset",
+                    "average_over_repetitions",
+                ]
+            )
         )
+        plot_layout.addWidget(self.settings.New_UI(["dset_reducer"]))
 
         # Container with horizontal layout holding both group boxes
         container = QtWidgets.QWidget()
@@ -209,7 +241,7 @@ class Map2D(Sweep2D):
             return
 
         dset = np.array(self.scan_data.data[self.settings["dataset"]])
-        img = dset.reshape(*(*self.scan_data.base_shape, -1)).mean(axis=-1)
+        img = self.apply_reducer(dset)
         self.img_item.setImage(img, rect=self.calc_rect())
 
     def get_ranges(self):
