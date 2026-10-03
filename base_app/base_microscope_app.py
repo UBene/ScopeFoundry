@@ -1031,8 +1031,16 @@ class BaseMicroscopeApp(BaseApp):
             else:
                 subwin.setGeometry(*win_state["geometry"])
 
+        if not self.mdi:
+            geometry = positions.get("main", {}).get("geometry")
+            if geometry:
+                self.ui.setGeometry(*geometry)
+            return
+
         self.set_subwindow_mode()
         for name, win_state in positions.items():
+            if name == "view_mode":
+                continue
             if name == "log":
                 restore_win_state(self.logging_subwin, win_state)
             elif name == "console":
@@ -1043,6 +1051,11 @@ class BaseMicroscopeApp(BaseApp):
             elif name.startswith("measurement/"):
                 M = self.measurements[name.split("/")[-1]]
                 restore_win_state(M.subwin, win_state)
+
+        if positions.get("view_mode") == "tab":
+            self.set_tab_mode()
+        else:
+            self.set_subwindow_mode()
 
     def get_window_positions(self) -> Dict[str, Any]:
         positions = OrderedDict()
@@ -1061,6 +1074,12 @@ class BaseMicroscopeApp(BaseApp):
 
         positions["main"] = win_state_from_subwin(self.ui)
         positions["main"]["col_splitter_sizes"] = self.ui.col_splitter.sizes()
+
+        if not self.mdi:
+            return positions
+
+        tabbed = self.ui.mdiArea.viewMode() == QtWidgets.QMdiArea.ViewMode.TabbedView
+        positions["view_mode"] = "tab" if tabbed else "subwindow"
 
         positions["log"] = win_state_from_subwin(self.logging_subwin)
         positions["console"] = win_state_from_subwin(self.console_subwin)
