@@ -53,6 +53,20 @@ class LQDisconnectFromWidgetTest(unittest.TestCase):
         self.assertEqual(wf.value(), 2.0)
         self.assertEqual(wi.value(), 2)
 
+    def test_checkbox(self):
+        widget = QtWidgets.QCheckBox()
+        self.bool.connect_to_widget(widget)
+        self.bool.update_value(True)
+        self.bool.disconnect_from_widget(widget)
+
+        self.bool.update_value(False)
+        self.assertTrue(widget.isChecked())
+        self.bool.update_value(True)
+        widget.click()
+
+        self.assertFalse(widget.isChecked())
+        self.assertTrue(self.bool.val)
+
 
 #     def test_pyqtgraph_spinbox(self):
 #         wf = SpinBox()
