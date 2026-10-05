@@ -536,7 +536,9 @@ class LoggedQuantity(QtCore.QObject):
                 update_widget_value
             )
             # if not self.ro:
-            widget.valueChanged[float].connect(self.update_value)
+            widget.from_connection = widget.valueChanged[float].connect(
+                self.update_value
+            )
 
         elif isinstance(widget, MinMaxQSlider):
             self.updated_value[float].connect(widget.update_value)
@@ -627,7 +629,7 @@ class LoggedQuantity(QtCore.QObject):
             if self.ro:
                 widget.setEnabled(False)
             else:
-                widget.clicked[bool].connect(self.update_value)
+                widget.from_connection = widget.clicked[bool].connect(self.update_value)
                 # only works if widget was clicked or
                 # widget value changed and widget.clicked.emit() was called
                 # Maybe more rigourous would be
@@ -811,10 +813,19 @@ class LoggedQuantity(QtCore.QObject):
 
         self.widget_list.remove(widget)
 
-        try:
-            widget.disconnect()
-        except RuntimeError:
-            pass
+        has_tracked_connections = False
+        for connection_name in ("to_connection", "from_connection"):
+            connection = getattr(widget, connection_name, None)
+            if connection is not None:
+                QtCore.QObject.disconnect(connection)
+                delattr(widget, connection_name)
+                has_tracked_connections = True
+
+        if not has_tracked_connections:
+            try:
+                widget.disconnect()
+            except RuntimeError:
+                pass
 
         for sig in [
             self.updated_value,
