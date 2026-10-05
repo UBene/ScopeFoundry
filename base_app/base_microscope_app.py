@@ -1024,17 +1024,19 @@ class BaseMicroscopeApp(BaseApp):
     def set_window_positions(self, positions: Dict[str, Any]) -> None:
         def restore_win_state(subwin: QtWidgets.QMdiSubWindow, win_state):
             subwin.showNormal()
-            if win_state["maximized"]:
+            if win_state.get("fullscreen", False):
+                subwin.showFullScreen()
+            elif win_state.get("maximized", False):
                 subwin.showMaximized()
-            elif win_state["minimized"]:
+            elif win_state.get("minimized", False):
                 subwin.showMinimized()
             else:
                 subwin.setGeometry(*win_state["geometry"])
 
         if not self.mdi:
-            geometry = positions.get("main", {}).get("geometry")
-            if geometry:
-                self.ui.setGeometry(*geometry)
+            main_state = positions.get("main", {})
+            if main_state:
+                restore_win_state(self.ui, main_state)
             return
 
         self.set_subwindow_mode()
