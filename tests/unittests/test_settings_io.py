@@ -1,10 +1,18 @@
 from pathlib import Path
+import json
+import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import numpy as np
+from qtpy import QtWidgets
 
-from ScopeFoundry import BaseMicroscopeApp, HardwareComponent, Measurement
+from ScopeFoundry import BaseMicroscopeApp, HardwareComponent, Measurement, ini_io
 from ScopeFoundry.base_app.base_app import WRITE_RES
+from ScopeFoundry.base_app.profile_manager import ProfileManager
+from ScopeFoundry.base_app.state_history import StateHistory
+from ScopeFoundry.tests.unittests.unittest_helpers import close_app_widgets
 
 
 class Measure1(Measurement):
@@ -33,7 +41,17 @@ INITIAL_CHOICES = [("choice 0", 0), ("choice 1", 1), ("choice 2", 2), ("choice 3
 class SettingsIOTest(unittest.TestCase):
 
     def setUp(self):
+        self._app_implementation_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._app_implementation_dir.cleanup)
+        implementation_dir_patch = patch.object(
+            ProfileManager,
+            "_app_implementation_dir",
+            return_value=Path(self._app_implementation_dir.name),
+        )
+        implementation_dir_patch.start()
+        self.addCleanup(implementation_dir_patch.stop)
         self.app = BaseMicroscopeApp([])
+        self.addCleanup(close_app_widgets, self.app)
         self.ms = self.app.add_measurement(Measure1(self.app))
         self.hw = self.app.add_hardware(Hardware1(self.app))
         self.root = Path(__file__).parent
@@ -134,6 +152,251 @@ class SettingsIOTest(unittest.TestCase):
         self.assertEqual(self.hws["string"], "0")
         self.assertEqual(self.hws["float"], 0.0)
         self.assertEqual(self.hws["choices"], 0)
+
+    def test_profile_saves_selected_components_and_window_positions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.app.profile_manager.profiles_dir = Path(temp_dir)
+            self.app.settings["sample"] = "not saved"
+            self.hws["float"] = 2.0
+            self.hws["choices"] = 1
+            self.mms["float"] = 3.0
+
+            self.app.profile_manager.save_profile(
+                "test profile",
+                setting_paths=["hw/hardware1/choices", "hw/hardware1/float"],
+            )
+
+            profile_dir = Path(temp_dir) / "test profile"
+            self.assertTrue((profile_dir / "settings.ini").is_file())
+            self.assertTrue((profile_dir / "window_positions.json").is_file())
+            window_positions = json.loads(
+                (profile_dir / "window_positions.json").read_text(encoding="utf-8")
+            )
+            self.assertIn("fullscreen", window_positions["main"])
+            self.hws["float"] = 4.0
+            self.hws["choices"] = 3
+            self.mms["float"] = 5.0
+            self.app.settings["sample"] = "changed"
+
+            self.app.profile_manager.load_profile("test profile")
+
+            self.assertEqual(self.hws["float"], 4.0)
+            self.assertEqual(self.hws["choices"], 1)
+            self.assertEqual(self.mms["float"], 5.0)
+            self.assertEqual(self.app.settings["sample"], "changed")
+
+    def test_non_mdi_window_positions_restore_fullscreen(self):
+        main_window = Mock()
+        app = SimpleNamespace(mdi=False, ui=main_window)
+        positions = {
+            "main": {
+                "geometry": (0, 0, 640, 480),
+                "maximized": False,
+                "minimized": False,
+                "fullscreen": True,
+            }
+        }
+
+        BaseMicroscopeApp.set_window_positions(app, positions)
+
+        main_window.showNormal.assert_called_once_with()
+        main_window.showFullScreen.assert_called_once_with()
+        main_window.setGeometry.assert_not_called()
+
+    def test_geometry_only_window_positions_remain_loadable(self):
+        main_window = Mock()
+        app = SimpleNamespace(mdi=False, ui=main_window)
+        positions = {"main": {"geometry": (0, 0, 640, 480)}}
+
+        BaseMicroscopeApp.set_window_positions(app, positions)
+
+        main_window.showNormal.assert_called_once_with()
+        main_window.setGeometry.assert_called_once_with(0, 0, 640, 480)
+
+    def test_startup_profile_is_persistent_and_independent_of_last_selection(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = self.app.profile_manager
+            manager.profiles_dir = Path(temp_dir) / "profiles"
+            implementation_dir = Path(temp_dir) / "app"
+            implementation_dir.mkdir()
+            manager.save_profile(
+                "startup choice", setting_paths=[], select_profile=False
+            )
+            manager.save_profile("last loaded", setting_paths=[], select_profile=False)
+
+            with patch.object(
+                manager, "_app_implementation_dir", return_value=implementation_dir
+            ):
+                manager._set_startup_profile("startup choice")
+                manager._set_selected_profile("last loaded")
+
+                self.assertEqual(
+                    json.loads(
+                        (implementation_dir / ".scopefoundry").read_text(
+                            encoding="utf-8"
+                        )
+                    )["startup_profile"],
+                    "startup choice",
+                )
+                self.assertEqual(manager._read_startup_profile(), "startup choice")
+                with patch.object(manager, "load_profile") as load_profile:
+                    manager.initialize_startup_profile()
+            load_profile.assert_called_once_with("startup choice")
+
+    def test_profile_settings_tree_cascades_component_checks(self):
+        tree, components, settings = self.app.profile_manager._make_settings_tree(
+            "measure1"
+        )
+        hardware_item = components["hw/hardware1"]
+        measurement_item = components["mm/measure1"]
+
+        self.assertEqual(hardware_item.checkState(0).value, 0)
+        self.assertEqual(measurement_item.checkState(0).value, 2)
+        self.assertFalse(hardware_item.isExpanded())
+        self.assertTrue(measurement_item.isExpanded())
+        self.assertTrue(
+            all(
+                item.checkState(0).value == 2
+                for path, item in settings.items()
+                if path.startswith("mm/measure1/") and not item.isDisabled()
+            )
+        )
+        for path in ("mm/measure1/string", "mm/measure1/float"):
+            self.assertTrue(settings[path].isDisabled())
+            self.assertEqual(settings[path].checkState(0).value, 0)
+
+        hardware_item.setCheckState(0, hardware_item.checkState(0).Checked)
+        self.assertTrue(
+            all(
+                item.checkState(0).value == 2
+                for path, item in settings.items()
+                if path.startswith("hw/hardware1/") and not item.isDisabled()
+            )
+        )
+        for path in ("hw/hardware1/string", "hw/hardware1/float"):
+            self.assertTrue(settings[path].isDisabled())
+            self.assertEqual(settings[path].checkState(0).value, 0)
+
+        settings["hw/hardware1/choices"].setCheckState(
+            0, settings["hw/hardware1/choices"].checkState(0).Unchecked
+        )
+        self.assertEqual(hardware_item.checkState(0).value, 1)
+
+    def test_update_selected_profile_preserves_settings_subset(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.app.profile_manager.profiles_dir = Path(temp_dir)
+            self.hws["choices"] = 1
+            self.hws["float"] = 2.0
+            self.app.profile_manager.save_profile(
+                "selected profile", setting_paths=["hw/hardware1/choices"]
+            )
+
+            self.assertEqual(
+                self.app.profile_manager.selected_profile_name, "selected profile"
+            )
+            self.assertEqual(
+                self.app.profile_manager._read_selected_profile(), "selected profile"
+            )
+            self.hws["choices"] = 2
+            self.hws["float"] = 3.0
+            self.app.profile_manager.update_selected_profile()
+
+            profile_settings = ini_io.load_settings(
+                Path(temp_dir) / "selected profile" / "settings.ini"
+            )
+            self.assertEqual(list(profile_settings), ["hw/hardware1/choices"])
+            self.hws["choices"] = 3
+            self.app.profile_manager.load_profile("selected profile")
+            self.assertEqual(self.hws["choices"], 2)
+            self.assertEqual(self.hws["float"], 3.0)
+
+    def test_delete_selected_profile_clears_saved_selection(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.app.profile_manager.profiles_dir = Path(temp_dir)
+            self.app.profile_manager.save_profile("selected profile", setting_paths=[])
+
+            with patch(
+                "ScopeFoundry.base_app.base_microscope_app.QtWidgets.QMessageBox.question",
+                return_value=QtWidgets.QMessageBox.StandardButton.Yes,
+            ):
+                self.app.profile_manager.delete_selected_profile()
+
+            self.assertFalse((Path(temp_dir) / "selected profile").exists())
+            self.assertFalse((Path(temp_dir) / ".last_selected_profile").exists())
+            self.assertEqual(self.app.profile_manager.selected_profile_name, "")
+
+    def test_history_restores_state_and_retains_configured_limit(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            history = self.app.profile_manager.history
+            history.history_dir = Path(temp_dir) / "history"
+            self.hws["choices"] = 1
+            first_entry = history.save_snapshot("checkpoint")
+            self.hws["choices"] = 2
+            history.restore_snapshot(first_entry.name)
+            self.assertEqual(self.hws["choices"], 1)
+
+            for index in range(history.max_entries + 1):
+                self.hws["choices"] = index % 4
+                history.save_snapshot(f"checkpoint {index}")
+            self.assertEqual(len(history._entry_paths()), history.max_entries)
+            reloaded_history = StateHistory(self.app, history.history_dir)
+            self.assertEqual(len(reloaded_history._entry_paths()), history.max_entries)
+
+    def test_history_menu_item_restores_snapshot(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            history = self.app.profile_manager.history
+            history.history_dir = Path(temp_dir) / "history"
+            self.hws["choices"] = 1
+            entry = history.save_snapshot("menu checkpoint")
+            self.hws["choices"] = 3
+
+            history.refresh_menu()
+            history_action = next(
+                action
+                for action in history.history_menu.actions()
+                if action.data() == entry.name
+            )
+            history_action.trigger()
+
+            self.assertEqual(self.hws["choices"], 1)
+
+
+    def test_nested_measurement_start_skips_history(self):
+        history = self.app.profile_manager.history
+        nested = self.app.measurements["measure1"]
+        with (
+            patch.object(nested, "_start") as start_measurement,
+            patch.object(nested, "is_measuring", side_effect=[True, False]),
+            patch.object(history, "save_snapshot") as save_snapshot,
+        ):
+            self.ms.start_nested_measure_and_wait(nested)
+
+        start_measurement.assert_called_once_with()
+        save_snapshot.assert_not_called()
+
+    def test_settings_autosave_records_history(self):
+        history = self.app.profile_manager.history
+        with (
+            patch.object(self.app, "settings_save_ini") as save_settings,
+            patch.object(history, "save_snapshot") as save_snapshot,
+        ):
+            self.app.settings_auto_save_ini()
+
+        save_settings.assert_called_once()
+        save_snapshot.assert_called_once_with("Settings autosaved")
+
+    def test_app_close_records_history_before_disconnect(self):
+        history = self.app.profile_manager.history
+        with (
+            patch.object(history, "save_snapshot") as save_snapshot,
+            patch.object(
+                self.hw.settings, "disconnect_all_from_hardware"
+            ) as disconnect,
+        ):
+            self.app.on_close()
+
+        save_snapshot.assert_called_once_with("Application closing")
+        disconnect.assert_called_once_with()
 
 
 if __name__ == "__main__":
