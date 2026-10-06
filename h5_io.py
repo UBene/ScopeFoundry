@@ -400,6 +400,34 @@ def load_settings(fname: str) -> None:
     return settings
 
 
+def measurement_names_with_datasets(fname: str) -> set:
+    """Return measurement groups in an H5 file that contain datasets."""
+    if Path(fname).suffix.lower() != ".h5":
+        return set()
+
+    measurement_names = set()
+    with h5py.File(fname, "r") as file:
+        if "measurement" not in file or not isinstance(
+            file["measurement"], h5py.Group
+        ):
+            return measurement_names
+
+        for measurement_name, measurement_group in file["measurement"].items():
+            if not isinstance(measurement_group, h5py.Group):
+                continue
+            found_dataset = [False]
+
+            def check_dataset(_name, node):
+                if isinstance(node, h5py.Dataset):
+                    found_dataset[0] = True
+
+            measurement_group.visititems(check_dataset)
+            if found_dataset[0]:
+                measurement_names.add(measurement_name)
+
+    return measurement_names
+
+
 def _settings_visitfunc(name: str, node: h5py.Group, settings: Dict[str, Any]) -> None:
     parts = name.split("/")
     if parts[-1] != "settings":
