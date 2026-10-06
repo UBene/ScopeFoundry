@@ -5,12 +5,14 @@ from qtpy import QtWidgets
 
 from ScopeFoundry.base_app.base_app import BaseApp
 from ScopeFoundry.widgets import MinMaxQSlider
+from ScopeFoundry.tests.unittests.unittest_helpers import close_app_widgets
 
 
 class LQDisconnectFromWidgetTest(unittest.TestCase):
 
     def setUp(self):
         self.app = app = BaseApp([])
+        self.addCleanup(close_app_widgets, self.app)
         self.settings = app.settings
         self.str = self.settings.New("str", str, initial="0")
         self.float = self.settings.New("float", float, vmin=-100, vmax=100)
@@ -20,11 +22,6 @@ class LQDisconnectFromWidgetTest(unittest.TestCase):
             "choices", int, choices=(("one", 1), ("two", 2), ("three", 3))
         )
         self._dir = self.settings.New("dir", "file", initial="test_dir", is_dir=True)
-
-    def tearDown(self):
-        # self.app.on_close()
-        self.app.qtapp.exit()
-        del self.app
 
     def test_qdouble_spinbox(self):
         wf = QtWidgets.QDoubleSpinBox()
