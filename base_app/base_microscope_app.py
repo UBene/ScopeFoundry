@@ -36,6 +36,7 @@ from ScopeFoundry.logged_quantity import LoggedQuantity, LQCollection
 from ScopeFoundry.operations import Operation, Operations
 
 from .base_app import BaseApp
+from .profile_manager import ProfileManager
 
 # useful for developing - may cause problems:
 from .base_microscope_app_mdi import Ui_MainWindow
@@ -86,6 +87,7 @@ class BaseMicroscopeApp(BaseApp):
         # objects to overwrite and populate with setup function.
         self.hardware: Dict[str, HardwareProtocol] = OrderedAttrDict()
         self.measurements: Dict[str, MeasurementProtocol] = OrderedAttrDict()
+        self.profile_manager = ProfileManager(self)
         self.logo_path = str(self.icons_path / "scopefoundry_logo2B_1024.png")
         self.quickbar = None  # also with self.add_quickbar
         self.docs_path = get_child_path(self) / "docs"
@@ -102,6 +104,7 @@ class BaseMicroscopeApp(BaseApp):
         self._setup_ui_logo()
         self._add_docs_to_help_menu()
         self._init_py_analysis_directory()
+        self.profile_manager.initialize_startup_profile()
 
         # self.snippets = {}
         # self.descriptive_snippets = ()
@@ -113,6 +116,80 @@ class BaseMicroscopeApp(BaseApp):
     def setup_ui(self) -> None:
         """Optional override to set up ui elements after default ui is built"""
         pass
+
+    def add_setting_path(self, lq: LoggedQuantity) -> None:
+        super().add_setting_path(lq)
+        profile_action_text = "Save current value to profile..."
+        remove_profile_action_text = "Remove saved value from profile..."
+        if (
+            not lq.ro
+            and not lq.protected
+            and not any(
+                len(action) >= 2 and action[-2] == profile_action_text
+                for action in lq.actions
+            )
+        ):
+            lq.actions.append(
+                (
+                    profile_action_text,
+                    partial(self._save_lq_value_to_profile, lq.path),
+                )
+            )
+        if (
+            not lq.ro
+            and not lq.protected
+            and not any(
+                len(action) >= 2 and action[-2] == remove_profile_action_text
+                for action in lq.actions
+            )
+        ):
+            lq.actions.append(
+                (
+                    remove_profile_action_text,
+                    partial(self._remove_lq_value_from_profile, lq.path),
+                )
+            )
+        if not lq.ro and self._save_ui_lq_change_snapshot not in lq.ui_listeners:
+            lq.add_listener_ui(
+                self._save_ui_lq_change_snapshot, argtype=(str, object, object)
+            )
+
+    def _save_lq_value_to_profile(self, path: str, checked: bool = False) -> None:
+        profile_manager = getattr(self, "profile_manager", None)
+        if profile_manager is not None:
+            profile_manager.save_setting_to_profile(path)
+
+    def _remove_lq_value_from_profile(self, path: str, checked: bool = False) -> None:
+        profile_manager = getattr(self, "profile_manager", None)
+        if profile_manager is not None:
+            profile_manager.remove_setting_from_profile(path)
+
+    def remove_setting_path(self, lq: LoggedQuantity) -> None:
+        if self._save_ui_lq_change_snapshot in lq.ui_listeners:
+            lq.remove_listener_ui(
+                self._save_ui_lq_change_snapshot, argtype=(str, object, object)
+            )
+        super().remove_setting_path(lq)
+
+    @QtCore.Slot(str, object, object)
+    def _save_ui_lq_change_snapshot(
+        self, path: str, old_value: Any, new_value: Any
+    ) -> None:
+        if path.endswith("/activation") and path.startswith("mm/"):
+            mm = path.split("/")[1]
+            if new_value:
+                self.profile_manager.history.save_snapshot(f"{mm} started")
+            else:
+                self.profile_manager.history.save_snapshot(f"{mm} stopped")
+        else:
+            if isinstance(new_value, float):
+                self.profile_manager.history.save_snapshot(
+                    f"{path} {round(old_value, 6)} -> {round(new_value, 6)}"
+                )
+            else:
+                self.profile_manager.history.save_snapshot(
+                    f"{path} {old_value} -> {new_value}"
+                )
 
     def _setup_settings_operations(self, **kwargs: Any) -> None:
         initial_save_path = Path.cwd() / "data"
@@ -316,6 +393,7 @@ class BaseMicroscopeApp(BaseApp):
         self.ui.action_about.triggered.connect(self.on_about)
         # Refer to existing ui object:
         self.menubar = self.ui.menuWindow
+        self.profile_manager.setup_menu(self.ui.menubar)
 
         self.ui.menuAdvanced.addAction(
             "new hardware", partial(self.start_tools, "new hardware")
@@ -519,7 +597,7 @@ class BaseMicroscopeApp(BaseApp):
 
     def on_close(self) -> None:
         self.log.info("on_close")
-        # disconnect all hardware objects
+        self.profile_manager.history.save_snapshot("Application closing")
         for hw in self.hardware.values():
             self.log.info(f"disconnecting {hw.name}")
             try:
@@ -791,6 +869,28 @@ class BaseMicroscopeApp(BaseApp):
         elif fname.suffix == ".h5":
             self.settings_load_h5(fname)
 
+    def read_settings_file(
+        self, fname: Path, expected_suffix: str = None
+    ) -> Dict[str, Any]:
+        """Read an INI or HDF5 settings file without applying its values."""
+        fname = Path(fname)
+        suffix = (expected_suffix or fname.suffix).lower()
+        if suffix == ".ini":
+            return ini_io.load_settings(fname)
+        if suffix == ".h5":
+            settings = h5_io.load_settings(fname)
+            for key in ("ScopeFoundry_version", "time_id", "unique_id", "uuid"):
+                settings.pop(key, None)
+            return settings
+        raise ValueError("Choose an INI or HDF5 (.h5) settings file.")
+
+    def settings_select_file_dialog(self) -> str:
+        """Open the standard settings file picker and return its selection."""
+        fname, _selected_filter = QtWidgets.QFileDialog.getOpenFileName(
+            self.ui, "Open Settings file", "", "Settings File (*.ini *.h5)"
+        )
+        return fname
+
     def settings_load_ini(
         self, fname: str, ignore_hw_connect: bool = False, show_report: bool = True
     ) -> None:
@@ -800,7 +900,7 @@ class BaseMicroscopeApp(BaseApp):
         fname           str        relative path to the filename of the ini file.
         ==============  =========  ==============================================
         """
-        settings = ini_io.load_settings(fname)
+        settings = self.read_settings_file(fname, ".ini")
 
         if ignore_hw_connect:
             settings = {
@@ -815,22 +915,6 @@ class BaseMicroscopeApp(BaseApp):
         self.propose_settings_values(Path(fname).name, settings)
         self.log.info(f"settings loaded from {fname}")
 
-    def settings_load_file_threaded(self, fname: str) -> None:
-        """Loads settings from a file in a separate thread to avoid blocking the UI.
-
-        Currently only supports ini files.
-        """
-        from threading import Thread
-
-        def task():
-            self.settings_load_file(fname)
-
-        def on_finished():
-            self.log.info(f"Finished loading settings from {fname}")
-
-        threaded_task = Thread(target=task)
-        threaded_task.start()
-
     def settings_load_h5(
         self, fname: str, ignore_hw_connect: bool = False, show_report: bool = True
     ) -> None:
@@ -842,13 +926,7 @@ class BaseMicroscopeApp(BaseApp):
         fname           str        relative path to the filename of the h5 file.
         ==============  =========  ====================================================================================
         """
-        settings = h5_io.load_settings(fname)
-
-        # ignoring some metadata that are not settings. Maybe should be excluded in h5_io.load_settings
-        for x in ("ScopeFoundry_version", "time_id", "unique_id", "uuid"):
-            if x in settings:
-                # print("ignoring", x)
-                settings.pop(x)
+        settings = self.read_settings_file(fname, ".h5")
 
         if ignore_hw_connect:
             settings = {
@@ -872,6 +950,7 @@ class BaseMicroscopeApp(BaseApp):
             / f"{datetime.datetime.now():%y%m%d_%H%M%S}_settings.ini"
         )
         self.settings_save_ini(fname)
+        self.profile_manager.history.save_snapshot("Settings autosaved")
 
     def settings_load_last(self) -> None:
         """
@@ -889,12 +968,13 @@ class BaseMicroscopeApp(BaseApp):
         if fname:
             self.settings_save_ini(fname)
 
-    def settings_load_dialog(self) -> None:
-        """Opens a load ini dialogue in the app user interface"""
-        fname, selectedFilter = QtWidgets.QFileDialog.getOpenFileName(
-            self.ui, "Open Settings file", "", "Settings File (*.ini *.h5)"
-        )
+    def settings_load_dialog(self) -> str:
+        """Select and load a settings file using the standard file picker."""
+        fname = self.settings_select_file_dialog()
+        if not fname:
+            return ""
         self.settings_load_file(fname)
+        return fname
 
     def get_operation(self, path: str) -> Operation:
         parts = path.split("/")
@@ -1148,10 +1228,7 @@ class BaseMicroscopeApp(BaseApp):
         path = Path(fname)
         if not path.exists() or path.suffix not in (".ini", ".h5"):
             return
-        if path.suffix == ".ini":
-            settings = ini_io.load_settings(path)
-        elif path.suffix == ".h5":
-            settings = h5_io.load_settings(path)
+        settings = self.read_settings_file(path)
         self.propose_settings_values(path.name, settings)
 
     def launch_browser(self, url: str) -> None:
