@@ -9,7 +9,7 @@ from functools import partial
 import matplotlib.pyplot as plt
 import numpy as np
 import pyqtgraph as pg
-from qtpy import QtWidgets, QtGui
+from qtpy import QtCore, QtWidgets, QtGui
 
 from ScopeFoundry import BaseMicroscopeApp, Measurement
 from ScopeFoundry.scanning.actuators import (
@@ -34,6 +34,43 @@ class SweepConfig(TypedDict):
     base_indices_gen_func: Callable[[], Generator[int]]
     progress_index_gen_func: Callable[[], Generator[int]]
     N: int
+
+
+class _CompactViewFilter(QtCore.QObject):
+    """Calls callback(compact); compact is False when maximized or in tabbed view."""
+
+    def __init__(self, ui, callback):
+        super().__init__(ui)
+        self._ui = ui
+        self._callback = callback
+        self._compact = None
+        self._subwin = None
+
+    def _find_subwin(self):
+        w = self._ui.parentWidget()
+        while w is not None and not isinstance(w, QtWidgets.QMdiSubWindow):
+            w = w.parentWidget()
+        return w
+
+    def update(self):
+        w = self._find_subwin()
+        if w is not self._subwin and w is not None:
+            self._subwin = w
+            w.windowStateChanged.connect(lambda *_: self.update())
+        expanded = (w or self._ui.window()).isMaximized()
+        if w is not None and w.mdiArea() is not None:
+            tabbed = QtWidgets.QMdiArea.ViewMode.TabbedView
+            expanded = expanded or w.mdiArea().viewMode() == tabbed
+        compact = not expanded
+        if compact != self._compact:
+            self._compact = compact
+            self._callback(compact)
+
+    def eventFilter(self, obj, event):
+        if event.type() in (QtCore.QEvent.Type.Resize, QtCore.QEvent.Type.Show):
+            # Defer: window state may not be final while the event is delivered.
+            QtCore.QTimer.singleShot(0, self.update)
+        return False
 
 
 class SweepNDBase(Measurement):
@@ -272,7 +309,7 @@ class SweepNDBase(Measurement):
 
             if not self._should_continue_sweep():
                 break
-            
+
             self.settings["remaining_sweeps"] = self.settings["remaining_sweeps"] - 1
 
             if self.scan_data.current_sweep > 0:
@@ -655,14 +692,14 @@ class SweepNDBase(Measurement):
             + "<i>never alters/deletes saved data files, always makes new files, reuses data in memory</i>"
             + "<p><i>RETAKE_POSITIONS:</i> Allows to retake (fix) inidiviual data points specified in Position List. To add positions ctrl click on data. Makes a new datafile with data in memory with retaken data points updated.</p>"
             + "<p><i>RETAKE_SLICE:</i> Retake a slice of data specified by start and stop indices. Makes a new datafile with data in memory with retaken data points updated.</p>"
-            + "<p><i>ADD_REPS:</i> Adds more repetitions to existing scan data to improve signal-to-noise ratio through additional averaging. You can change the number of repetitions for collectors that are already active (i.e. have non-zero repetitions) and activate <i>re-sweep</i>. Makes a new datafile with data with more repetitions.</p>",
+            + "<p><i>ADD_REPS:</i> Adds more repetitions to existing scan data to improve signal-to-noise ratio through additional averaging. You can change the number of repetitions for collectors that are already active (i.e. have non-zero repetitions) and change <i>remaining-sweep</i>. Makes a new datafile with data with more repetitions.</p>",
         )
         s.New(
             name="collection_delay",
             initial=0.01,
             unit="s",
             spinbox_decimals=3,
-            description="after setting first actuator(s) position(s), data collection is delayed, allowing the system to reach steady state",       
+            description="after setting first actuator(s) position(s), data collection is delayed, allowing the system to reach steady state",
         )
         s.New(
             name="initial_delay",
@@ -846,13 +883,47 @@ class SweepNDBase(Measurement):
         layout = QtWidgets.QVBoxLayout(self.ui)
         layout.setSpacing(4)
         layout.setContentsMargins(8, 8, 8, 8)
-        layout.addWidget(top_widget)
 
         # order matters here
         graph_widget = self.mk_graph_widget()
 
-        layout.addWidget(self.mk_plot_options_widget())
-        layout.addWidget(self.wrap_with_position_list_widget(graph_widget))
+        # Controls scroll horizontally so their minimum size does not block shrinking.
+        controls = QtWidgets.QWidget()
+        controls_layout = QtWidgets.QVBoxLayout(controls)
+        controls_layout.setSpacing(4)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.addWidget(top_widget)
+        controls_layout.addWidget(self.mk_plot_options_widget())
+
+        controls_scroll = QtWidgets.QScrollArea()
+        controls_scroll.setWidgetResizable(True)
+        controls_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        controls_scroll.setMinimumSize(1, 1)
+        controls_scroll.setVerticalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        controls_scroll.setFixedHeight(
+            controls.sizeHint().height()
+            + controls_scroll.horizontalScrollBar().sizeHint().height()
+            + 2 * controls_scroll.frameWidth()
+        )
+        controls_scroll.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Fixed
+        )
+        controls_scroll.setWidget(controls)
+        layout.addWidget(controls_scroll)
+
+        self._compact_start_btn = self.new_start_stop_button()
+        layout.addWidget(self._compact_start_btn)
+
+        plot_row = self.wrap_with_position_list_widget(graph_widget)
+        plot_row.setMinimumSize(1, 1)
+        layout.addWidget(plot_row, 1)
+
+        self._compact_hidden_widgets = [controls_scroll, self._position_list_widget]
+        self._compact_filter = _CompactViewFilter(self.ui, self._set_compact)
+        self.ui.installEventFilter(self._compact_filter)
+        self._set_compact(True)
 
         self.display_ready = False
         self.set_status(f"starting {self.name}", "y")
@@ -869,6 +940,11 @@ class SweepNDBase(Measurement):
         self.set_status("welc\u1e4fme", (253, 188, 24), True)
 
         self.update_widgets()
+
+    def _set_compact(self, compact: bool) -> None:
+        for w in self._compact_hidden_widgets:
+            w.setVisible(not compact)
+        self._compact_start_btn.setVisible(compact)
 
     def update_display(self) -> None:
         self.update_status_display()
@@ -1209,14 +1285,9 @@ class SweepNDBase(Measurement):
         self.axes.addItem(self.img_item)
         self.img_item.setVisible(False)
 
-        graph_widget.setMinimumHeight(400)
+        graph_widget.setMinimumSize(1, 1)
         graph_widget.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Preferred,
-            QtWidgets.QSizePolicy.Policy.MinimumExpanding,
-        )
-
-        graph_widget.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred
+            QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Ignored
         )
 
         self.locator = LocatorX(self, self.position_list)
@@ -1231,8 +1302,9 @@ class SweepNDBase(Measurement):
         layout.setSpacing(0)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        layout.addWidget(graph_widget)
-        layout.addWidget(self.position_list.mk_widget())
+        layout.addWidget(graph_widget, 1)
+        self._position_list_widget = self.position_list.mk_widget()
+        layout.addWidget(self._position_list_widget)
         return widget
 
     def get_current_actuators_defs(self) -> List[ActuatorInfos]:
@@ -1300,18 +1372,7 @@ class SweepNDBase(Measurement):
 
         dataset_name = self.settings["dataset"]
 
-        if self.settings["average_over_repetitions"]:
-            import warnings
-
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
-            dset = np.nanmean(self.scan_data.data[dataset_name], axis=self.ndim)
-            size = self.scan_data.get_dset_size_per_position_and_repeats(dataset_name)
-        else:
-            dset = self.scan_data.data[dataset_name]
-            size = self.scan_data.get_dset_size_per_position(dataset_name)
-
-        # Flatten data to positions x size
-        img = dset[tuple(zip(*self.scan_data.indices))].reshape((-1, size))
+        size, img = self.map_vertical_img(dataset_name)
 
         if self.settings["dset_reducer"] == "None":
             pass
@@ -1347,6 +1408,21 @@ class SweepNDBase(Measurement):
         img = img[i_min:i_max, :]
 
         return img, size, i_min, i_max
+
+    def map_vertical_img(self, dataset_name):
+        if self.settings["average_over_repetitions"]:
+            import warnings
+
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+            dset = np.nanmean(self.scan_data.data[dataset_name], axis=self.ndim)
+            size = self.scan_data.get_dset_size_per_position_and_repeats(dataset_name)
+        else:
+            dset = self.scan_data.data[dataset_name]
+            size = self.scan_data.get_dset_size_per_position(dataset_name)
+
+        # Flatten data to positions x size
+        img = dset[tuple(zip(*self.scan_data.indices))].reshape((-1, size))
+        return size, img
 
     def _should_use_real_positions(self, size):
         """Determine if real positions should be used on x-axis.
