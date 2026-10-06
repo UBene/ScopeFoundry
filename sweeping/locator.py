@@ -56,6 +56,7 @@ class LocatorBase:
         self.add_btn.setMaximumWidth(160)
 
         self.widget = QtWidgets.QGroupBox("Locator Controls")
+        self.widget.setStyleSheet("QGroupBox::title { color: #FF5722; }")
         layout = QtWidgets.QHBoxLayout(self.widget)
         layout.addWidget(self.as_center_btn)
         layout.addWidget(self.go_to_btn)
