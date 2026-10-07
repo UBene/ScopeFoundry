@@ -953,25 +953,33 @@ class ProfileManager:
         if selected_measurement:
             default_name += f"_{selected_measurement}"
 
-        class ProfileEditorDialog(QtWidgets.QDialog):
-            def __init__(self, parent):
-                super().__init__(parent)
+        existing_editor = getattr(self, "_profile_editor", None)
+        if existing_editor is not None:
+            if not existing_editor.close():
+                existing_editor.raise_()
+                existing_editor.activateWindow()
+                return
+
+        manager = self
+
+        class ProfileEditorWindow(QtWidgets.QWidget):
+            def __init__(self):
+                # No parent: a separate top-level window, not tied to the main app.
+                super().__init__(None)
+                self.setWindowFlag(QtCore.Qt.WindowType.Window, True)
+                self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
                 self.can_close = lambda: True
-                self._close_approved = False
 
             def closeEvent(self, event):
                 if self.can_close():
-                    self._close_approved = True
+                    if getattr(manager, "_profile_editor", None) is self:
+                        manager._profile_editor = None
                     super().closeEvent(event)
                 else:
                     event.ignore()
 
-            def reject(self):
-                if self._close_approved or self.can_close():
-                    self._close_approved = False
-                    super().reject()
-
-        dialog = ProfileEditorDialog(self.app.ui)
+        dialog = ProfileEditorWindow()
+        self._profile_editor = dialog
         dialog.setWindowTitle("Edit profiles")
         layout = QtWidgets.QVBoxLayout(dialog)
 
@@ -1397,7 +1405,7 @@ class ProfileManager:
             else:
                 set_new_profile(confirm=False)
 
-        dialog.exec()
+        dialog.show()
 
     def save_profile(
         self,
