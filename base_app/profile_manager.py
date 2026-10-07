@@ -986,7 +986,16 @@ class ProfileManager:
         form = QtWidgets.QFormLayout()
         profile_selector = QtWidgets.QComboBox()
         profile_selector.addItems(self._profile_names())
-        form.addRow("Existing profile:", profile_selector)
+        apply_button = QtWidgets.QPushButton("Apply")
+        apply_button.setToolTip("Applies the saved profile")
+        apply_button.clicked.connect(
+            lambda: current_profile["name"]
+            and self.load_profile(current_profile["name"])
+        )
+        selector_row = QtWidgets.QHBoxLayout()
+        selector_row.addWidget(profile_selector, 1)
+        selector_row.addWidget(apply_button)
+        form.addRow("Existing profile:", selector_row)
         startup_profile_selector = QtWidgets.QComboBox()
         layout.addLayout(form)
 
