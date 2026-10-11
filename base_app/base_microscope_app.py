@@ -417,6 +417,7 @@ class BaseMicroscopeApp(BaseApp):
                 self.window_positions_save_dialog
             )
             self.ui.action_load_all_measure_uis.setVisible(False)
+            self._add_view_mode_action()
         else:
             self.ui.tab_action.setVisible(False)
             self.ui.window_action.setVisible(False)
@@ -546,10 +547,45 @@ class BaseMicroscopeApp(BaseApp):
     def set_subwindow_mode(self) -> None:
         """Switches Multiple Document Interface to Subwindowed viewing mode."""
         self.ui.mdiArea.setViewMode(QtWidgets.QMdiArea.ViewMode.SubWindowView)
+        self._update_view_mode_action()
 
     def set_tab_mode(self) -> None:
         """Switches Multiple Document Interface to Tabbed viewing mode."""
         self.ui.mdiArea.setViewMode(QtWidgets.QMdiArea.ViewMode.TabbedView)
+        self._update_view_mode_action()
+
+    # figure spaces pad both labels to a similar width
+    _VIEW_MODE_LABELS = {
+        "subwindow": "\u29c9 Windows",
+        "tab": "\u25ad Tabs\u2007\u2007\u2007",
+    }
+
+    def _add_view_mode_action(self) -> None:
+        # QMenuBar only renders plain actions and menus, not widgets
+        action = QtGui.QAction(self.ui.menubar)
+        action.triggered.connect(self.toggle_view_mode)
+        self._view_mode_action = action
+        self.ui.menubar.addAction(action)
+        self._update_view_mode_action()
+
+    def _update_view_mode_action(self) -> None:
+        action = getattr(self, "_view_mode_action", None)
+        if action is None:
+            return
+        tabbed = self.ui.mdiArea.viewMode() == QtWidgets.QMdiArea.ViewMode.TabbedView
+        # label shows the current mode
+        action.setText(self._VIEW_MODE_LABELS["tab" if tabbed else "subwindow"])
+        action.setToolTip(
+            "Tabbed mode (click for subwindows)"
+            if tabbed
+            else "Subwindow mode (click for tabs)"
+        )
+
+    def toggle_view_mode(self) -> None:
+        if self.ui.mdiArea.viewMode() == QtWidgets.QMdiArea.ViewMode.TabbedView:
+            self.set_subwindow_mode()
+        else:
+            self.set_tab_mode()
 
     def tile_layout(self) -> None:
         """Tiles subwindows in user interface. Specifically in the Multi Document Interface."""
@@ -648,17 +684,18 @@ class BaseMicroscopeApp(BaseApp):
 
         buttons = []
         for text, tip, side in [
-            ("\u25e7", "Snap left half", "left"),
-            ("\u25e8", "Snap right half", "right"),
             ("\u2b12", "Snap top half", "top"),
             ("\u2b13", "Snap bottom half", "bottom"),
+            ("\u25e7", "Snap left half", "left"),
+            ("\u25e8", "Snap right half", "right"),
         ]:
             btn = QtWidgets.QToolButton(subwin)
             btn.setText(text)
             btn.setToolTip(tip)
             btn.setAutoRaise(True)
             glyph_font = QtGui.QFont(title_font)
-            glyph_font.setPointSizeF(title_font.pointSizeF() * 1.5)
+            if side == "left" or side == "right":
+                glyph_font.setPointSizeF(title_font.pointSizeF() * 1.6)
             btn.setFont(glyph_font)
             btn.clicked.connect(partial(self.snap_mdi_subwin, subwin, side))
             buttons.append(btn)
@@ -667,7 +704,7 @@ class BaseMicroscopeApp(BaseApp):
             th = subwin.style().pixelMetric(
                 QtWidgets.QStyle.PixelMetric.PM_TitleBarHeight
             )
-            size = th
+            size = round(th * 0.8)
             # place the buttons left of the style's own min/max buttons
             opt = QtWidgets.QStyleOptionTitleBar()
             opt.initFrom(subwin)
@@ -683,10 +720,12 @@ class BaseMicroscopeApp(BaseApp):
             right_edge = (
                 min_rect.left() if min_rect.isValid() else subwin.width() - 3 * th
             )
-            x = right_edge - 8 - size * len(buttons)
+            widths = [size] * len(buttons)
+            x = right_edge - 8 - sum(widths)
             visible = not subwin.isMaximized()
-            for i, btn in enumerate(buttons):
-                btn.setGeometry(x + i * size, max((th - size) // 2, 0), size, size)
+            for btn, w in zip(buttons, widths):
+                btn.setGeometry(x, max((th - size) // 2, 0), w, size)
+                x += w
                 btn.setVisible(visible)
                 btn.raise_()
 
