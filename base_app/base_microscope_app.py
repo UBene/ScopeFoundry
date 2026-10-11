@@ -1134,13 +1134,36 @@ class BaseMicroscopeApp(BaseApp):
                 M = self.measurements[name.split("/")[-1]]
                 restore_win_state(M.subwin, win_state)
 
+        subwins = {
+            "log": self.logging_subwin,
+            "console": self.console_subwin,
+        }
+        for name in positions:
+            if name.startswith("measurement/"):
+                subwins[name] = self.measurements[name.split("/")[-1]].subwin
+        z_ordered = sorted(
+            (n for n in subwins if "z" in positions[n]),
+            key=lambda n: positions[n]["z"],
+        )
+        for name in z_ordered:  # bottom to top
+            subwins[name].raise_()
+
         if positions.get("view_mode") == "tab":
             self.set_tab_mode()
         else:
             self.set_subwindow_mode()
 
+        # the active subwindow decides which tab is shown
+        if z_ordered:
+            self.ui.mdiArea.setActiveSubWindow(subwins[z_ordered[-1]])
+
     def get_window_positions(self) -> Dict[str, Any]:
         positions = OrderedDict()
+        stacking = (
+            self.ui.mdiArea.subWindowList(QtWidgets.QMdiArea.WindowOrder.StackingOrder)
+            if self.mdi
+            else []
+        )
 
         def qrect_to_tuple(qr):
             return (qr.x(), qr.y(), qr.width(), qr.height())
@@ -1152,6 +1175,8 @@ class BaseMicroscopeApp(BaseApp):
                 minimized=subwin.isMinimized(),
                 fullscreen=subwin.isFullScreen(),
             )
+            if subwin in stacking:
+                window_state["z"] = stacking.index(subwin)
             return window_state
 
         positions["main"] = win_state_from_subwin(self.ui)

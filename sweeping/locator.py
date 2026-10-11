@@ -55,9 +55,9 @@ class LocatorBase:
         self.as_center_btn = QtWidgets.QPushButton("Set as Center")
         self.add_btn = QtWidgets.QPushButton("Add\nto Position List")
 
-        self.go_to_btn.setMinimumHeight(50)
-        self.as_center_btn.setMinimumHeight(50)
-        self.add_btn.setMinimumHeight(50)
+        self.go_to_btn.setFixedHeight(45)
+        self.as_center_btn.setFixedHeight(45)
+        self.add_btn.setFixedHeight(45)
 
         self.go_to_btn.setMaximumWidth(160)
         self.as_center_btn.setMaximumWidth(160)
@@ -134,9 +134,8 @@ class LocatorBase:
         self._update_locator_button_enabled_state()
         if self.go_to_btn:
             self.go_to_btn.setEnabled(False)
-            self.go_to_btn.setText("Invalid Position:\nDrag locator within data range")
-            self.go_to_btn.setStyleSheet(
-                """
+            self.go_to_btn.setText("Drag locator\nwithin data range")
+            self.go_to_btn.setStyleSheet("""
                 QPushButton {
                     color: #f44336;
                     font-weight: 600;
@@ -144,16 +143,12 @@ class LocatorBase:
                 QPushButton:hover {
                     color: #d32f2f;
                 }
-            """
-            )
+            """)
 
         if self.as_center_btn:
             self.as_center_btn.setEnabled(False)
-            self.as_center_btn.setText(
-                "Invalid Position:\nDrag locator within data range"
-            )
-            self.as_center_btn.setStyleSheet(
-                """
+            self.as_center_btn.setText("Drag locator\nwithin data range")
+            self.as_center_btn.setStyleSheet("""
                 QPushButton {
                     color: #f44336;
                     font-weight: 600;
@@ -161,13 +156,11 @@ class LocatorBase:
                 QPushButton:hover {
                     color: #d32f2f;
                 }
-            """
-            )
+            """)
         if self.add_btn:
             self.add_btn.setEnabled(False)
-            self.add_btn.setText("Invalid Position:\nDrag locator within data range")
-            self.add_btn.setStyleSheet(
-                """
+            self.add_btn.setText("Drag locator\nwithin data range")
+            self.add_btn.setStyleSheet("""
                 QPushButton {
                     color: #f44336;
                     font-weight: 600;
@@ -175,8 +168,7 @@ class LocatorBase:
                 QPushButton:hover {
                     color: #d32f2f;
                 }
-            """
-            )
+            """)
 
     def _update_valid_position_ui(
         self, positions: Tuple[float, ...], info_text=None
@@ -193,37 +185,31 @@ class LocatorBase:
         if self.go_to_btn:
             self.go_to_btn.setEnabled(self.locator_visible)
             self.go_to_btn.setText(f"Set Actuator Position\n({pretty_pos})")
-            self.go_to_btn.setStyleSheet(
-                """
+            self.go_to_btn.setStyleSheet("""
                 QPushButton {
                     color: #4caf50;
                     font-weight: 600;
                 }
-            """
-            )
+            """)
 
         if self.as_center_btn:
             self.as_center_btn.setEnabled(self.locator_visible)
             self.as_center_btn.setText(f"Set as Center\n({pretty_pos})")
-            self.as_center_btn.setStyleSheet(
-                """
+            self.as_center_btn.setStyleSheet("""
                 QPushButton {
                     font-weight: 600;
                 }
-            """
-            )
+            """)
 
         if self.add_btn:
             self.add_btn.setEnabled(self.locator_visible)
             self.add_btn.setText(f"Add to Position List\n({pretty_pos})")
-            self.add_btn.setStyleSheet(
-                """
+            self.add_btn.setStyleSheet("""
                 QPushButton {
                     color: #2196f3;
                     font-weight: 600;
                 }
-            """
-            )
+            """)
 
     def on_indicator_moved(self):
         """Handle infinite line movement."""
@@ -386,9 +372,9 @@ class LocatorX(LocatorBase):
             index = round((x_plot_position) / self.size) + self.i_min
         else:
             index = int((x_plot_position)) + self.i_min
-        
+
         self.sweep.set_status(f"index {index}", force_report=True)
-        
+
         if index < 0:
             return None
         elif index >= len(self.sweep.scan_data.positions):
