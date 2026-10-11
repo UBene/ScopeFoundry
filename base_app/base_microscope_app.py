@@ -468,6 +468,44 @@ class BaseMicroscopeApp(BaseApp):
         # Apply initial width fix
         update_quickaccess_width()
 
+        self._install_proportional_subwin_scaling()
+
+    def _install_proportional_subwin_scaling(self) -> None:
+        """Scale subwindows with the MDI area when it is resized, e.g. by a splitter."""
+        app = self
+        mdi_area = self.ui.mdiArea
+        app._suppress_subwin_scaling = False
+
+        class _Filter(QtCore.QObject):
+            def eventFilter(self, obj, event):
+                if event.type() != QtCore.QEvent.Type.Resize:
+                    return False
+                old, new = event.oldSize(), event.size()
+                if (
+                    app._suppress_subwin_scaling
+                    or old.width() <= 0
+                    or old.height() <= 0
+                ):
+                    return False
+                if mdi_area.viewMode() != QtWidgets.QMdiArea.ViewMode.SubWindowView:
+                    return False
+                fx = new.width() / old.width()
+                fy = new.height() / old.height()
+                for sw in mdi_area.subWindowList():
+                    if sw.isMaximized() or sw.isMinimized() or sw.isFullScreen():
+                        continue
+                    g = sw.geometry()
+                    sw.setGeometry(
+                        round(g.x() * fx),
+                        round(g.y() * fy),
+                        max(round(g.width() * fx), 1),
+                        max(round(g.height() * fy), 1),
+                    )
+                return False
+
+        mdi_area._scale_filter = _Filter(mdi_area)
+        mdi_area.installEventFilter(mdi_area._scale_filter)
+
     def _adjust_quickaccess_scroll_area_size_policies(self) -> None:
         # Fix horizontal scrolling: ensure content widget width matches viewport width
         scroll_area = self.ui.quickaccess_scrollArea
@@ -575,6 +613,7 @@ class BaseMicroscopeApp(BaseApp):
             | QtCore.Qt.WindowType.WindowMinMaxButtonsHint,
         )
         subwin.setMinimumSize(0, 0)
+        self._add_snap_actions(subwin)
         ignore_on_close(subwin)
         subwin.setWindowTitle(name)
         subwin.setWindowIcon(widget.windowIcon())
@@ -586,6 +625,98 @@ class BaseMicroscopeApp(BaseApp):
         )
         subwin.show()
         return subwin
+
+    def _add_snap_actions(self, subwin: QtWidgets.QMdiSubWindow) -> None:
+        """Overlay snap buttons on the top right of the subwindow title bar."""
+        PM_TITLE = QtWidgets.QStyle.PixelMetric.PM_TitleBarHeight
+
+        class _TallTitleStyle(QtWidgets.QProxyStyle):
+            def pixelMetric(self, metric, option=None, widget=None):
+                value = super().pixelMetric(metric, option, widget)
+                return round(value * 1.3) if metric == PM_TITLE else value
+
+        subwin._tall_title_style = _TallTitleStyle(subwin.style().objectName())
+        subwin.setStyle(subwin._tall_title_style)
+
+        # the title bar uses the subwindow font; keep the content font unchanged
+        content_font = subwin.font()
+        title_font = QtGui.QFont(content_font)
+        title_font.setPointSizeF(content_font.pointSizeF() * 1.3)
+        title_font.setBold(True)
+        subwin.setFont(title_font)
+        subwin.widget().setFont(content_font)
+
+        buttons = []
+        for text, tip, side in [
+            ("\u25e7", "Snap left half", "left"),
+            ("\u25e8", "Snap right half", "right"),
+            ("\u2b12", "Snap top half", "top"),
+            ("\u2b13", "Snap bottom half", "bottom"),
+        ]:
+            btn = QtWidgets.QToolButton(subwin)
+            btn.setText(text)
+            btn.setToolTip(tip)
+            btn.setAutoRaise(True)
+            glyph_font = QtGui.QFont(title_font)
+            glyph_font.setPointSizeF(title_font.pointSizeF() * 1.5)
+            btn.setFont(glyph_font)
+            btn.clicked.connect(partial(self.snap_mdi_subwin, subwin, side))
+            buttons.append(btn)
+
+        def reposition():
+            th = subwin.style().pixelMetric(
+                QtWidgets.QStyle.PixelMetric.PM_TitleBarHeight
+            )
+            size = th
+            # place the buttons left of the style's own min/max buttons
+            opt = QtWidgets.QStyleOptionTitleBar()
+            opt.initFrom(subwin)
+            opt.rect = QtCore.QRect(0, 0, subwin.width(), th)
+            opt.titleBarFlags = subwin.windowFlags()
+            opt.subControls = QtWidgets.QStyle.SubControl.SC_TitleBarMinButton
+            min_rect = subwin.style().subControlRect(
+                QtWidgets.QStyle.ComplexControl.CC_TitleBar,
+                opt,
+                QtWidgets.QStyle.SubControl.SC_TitleBarMinButton,
+                subwin,
+            )
+            right_edge = (
+                min_rect.left() if min_rect.isValid() else subwin.width() - 3 * th
+            )
+            x = right_edge - 8 - size * len(buttons)
+            visible = not subwin.isMaximized()
+            for i, btn in enumerate(buttons):
+                btn.setGeometry(x + i * size, max((th - size) // 2, 0), size, size)
+                btn.setVisible(visible)
+                btn.raise_()
+
+        class _Filter(QtCore.QObject):
+            def eventFilter(self, obj, event):
+                if event.type() in (
+                    QtCore.QEvent.Type.Resize,
+                    QtCore.QEvent.Type.Show,
+                    QtCore.QEvent.Type.WindowStateChange,
+                ):
+                    reposition()
+                return False
+
+        subwin._snap_filter = _Filter(subwin)
+        subwin.installEventFilter(subwin._snap_filter)
+        reposition()
+
+    def snap_mdi_subwin(self, subwin: QtWidgets.QMdiSubWindow, side: str) -> None:
+        """Resize subwin to fill one half of the MDI area."""
+        area = self.ui.mdiArea.viewport().rect()
+        w, h = area.width(), area.height()
+        rects = {
+            "left": (0, 0, w // 2, h),
+            "right": (w // 2, 0, w - w // 2, h),
+            "top": (0, 0, w, h // 2),
+            "bottom": (0, h // 2, w, h - h // 2),
+        }
+        subwin.showNormal()
+        subwin.setGeometry(*rects[side])
+        subwin.raise_()
 
     def add_quickbar(self, widget: QtWidgets.QWidget) -> QtWidgets.QWidget:
         self.ui.quickaccess_scrollArea.setVisible(True)
@@ -1120,6 +1251,7 @@ class BaseMicroscopeApp(BaseApp):
             return
 
         self.set_subwindow_mode()
+        self._suppress_subwin_scaling = True
         for name, win_state in positions.items():
             if name == "view_mode":
                 continue
@@ -1133,6 +1265,7 @@ class BaseMicroscopeApp(BaseApp):
             elif name.startswith("measurement/"):
                 M = self.measurements[name.split("/")[-1]]
                 restore_win_state(M.subwin, win_state)
+        self._suppress_subwin_scaling = False
 
         subwins = {
             "log": self.logging_subwin,
