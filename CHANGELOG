@@ -1,3 +1,22 @@
+ScopeFoundry 2.4.0 2026-10-11
+
+	* Features added:
+		- [base_microscope_app] subwindows get snap buttons in the title bar (top/bottom/left/right half), a taller bold title bar, proportional scaling of subwindows when the MDI area is resized (e.g. by a splitter), and a menu-bar button to toggle between subwindow and tabbed mode.
+		- [base_microscope_app] window positions now also save the stacking order (z) and maximized state; improved window-position saving.
+		- [profile_manager] new profile manager with state history, detached window and apply button.
+		- [hardware] option to connect in a thread.
+		- [measurement] display updates moved to the GUI thread; improved stability of nested measurements.
+		- [h5_io/dataset_metadata] version 240, measurement metadata and other measurements' settings are saved; fixed duplicate dataset loader implementation in generate_loaders.
+		- [logged_quantity/LQCollection] added requires_connection; listeners can be restricted to ui-only changes.
+		- [sweeping] slicing for 1D sweeps; reducer is applied in Map2D; locator can be disabled; locator/sweep stability fixes and reducers.
+		- [tree widget] added colors.
+
+	* Fixes:
+		- [logged_quantity] fixed widget disconnection.
+		- [base_microscope_app] loading a profile saved in tab mode now shows the correct tab on the first load.
+		- improved tests.
+
+
 ScopeFoundry 2.3.0 2026-09-10
 
 	* Features added:
