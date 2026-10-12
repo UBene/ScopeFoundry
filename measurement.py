@@ -130,8 +130,8 @@ class Measurement:
 
         if hasattr(self, "ui_filename"):
             self.load_ui()
-        self.setup()
         self.subwin = None  # will be set when the measurement is added to the app
+        self.setup()
         self.end_state = "not defined"
 
         self._init_py_analysis_directory()
