@@ -25,6 +25,7 @@ class Map2D(Sweep2D):
         n_any_measurements=2,
         invert_h=False,
         invert_v=False,
+        **kwargs,
     ):
         super().__init__(
             app,
@@ -35,6 +36,7 @@ class Map2D(Sweep2D):
             range_n_intervals,
             n_read_any_settings,
             n_any_measurements,
+            **kwargs,
         )
         self.invert_h = invert_h
         self.invert_v = invert_v

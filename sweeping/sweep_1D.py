@@ -515,6 +515,7 @@ class Sweep1D(SweepNDBase):
         range_n_intervals: Sequence[int] = (1,),
         n_read_any_settings: int = 2,
         n_any_measurements: int = 2,
+        **kwargs,
     ):
         # Add flag for average_to_scan_shape setting
         self.add_average_to_scan_shape = True
@@ -529,6 +530,7 @@ class Sweep1D(SweepNDBase):
             range_n_intervals=range_n_intervals,
             n_read_any_settings=n_read_any_settings,
             n_any_measurements=n_any_measurements,
+            **kwargs,
         )
 
     def setup(self) -> None:

@@ -31,6 +31,7 @@ class Sweep2D(SweepNDBase):
         range_n_intervals: Sequence[int] = (1, 1),
         n_read_any_settings: int = 2,
         n_any_measurements: int = 2,
+        **kwargs,
     ):
         super().__init__(
             app=app,
@@ -41,6 +42,7 @@ class Sweep2D(SweepNDBase):
             range_n_intervals=range_n_intervals,
             n_read_any_settings=n_read_any_settings,
             n_any_measurements=n_any_measurements,
+            **kwargs,
         )
 
     # Implement abstract methods from base class

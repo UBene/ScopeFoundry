@@ -653,7 +653,25 @@ class SweepNDBase(Measurement):
         range_n_intervals: Sequence[int] = (1,),
         n_read_any_settings: int = 2,
         n_any_measurements: int = 2,
+        **kwargs: dict,
     ):
+        """Initialize the sweep with the given parameters.
+        Initialize the sweep with the given parameters.
+
+        Parameters:
+        - app: The main application instance.
+        - name: Optional name for the sweep.
+        - collectors: Sequence of collector instances.
+        - actuators: Sequence of actuator definitions.
+        - actuator_names: Sequence of actuator names.
+        - range_n_intervals: Sequence of integers specifying the number of intervals for each range.
+        - n_read_any_settings: Number of read-any settings.
+        - n_any_measurements: Number of any measurements.
+        - kwargs: dictionary containing additional keyword arguments
+            - include_sweep_type: Boolean indicating whether to include the sweep type in the range setup.
+            - include_center_span: Boolean indicating whether to include the center-span representation in the range setup.
+            - spinbox_decimals: Integer specifying the number of decimal places for spinboxes in the range setup.
+        """
         self.collectors = [copy(x) for x in collectors]
         self.user_defined_actuators = list(actuators)
         self.actuator_names = actuator_names
@@ -665,6 +683,7 @@ class SweepNDBase(Measurement):
         self.data = {}
         self.dataset_names = []
         self.extent_control_names = []
+        self.kwargs = kwargs
         super().__init__(app, name)
         self.color = "#777777"  # QtGui.QColor.fromHsl(20, 22, 22, 25)  # Example color, replace with desired hex color code
 
@@ -792,11 +811,25 @@ class SweepNDBase(Measurement):
             )
             if n == 1:
                 self.scan_ranges.append(
-                    s.New_Range(f"range_{name}", True, False, initials=(1, 2, 11))
+                    s.New_Range(
+                        f"range_{name}",
+                        include_sweep_type=self.kwargs.get("include_sweep_type", False),
+                        include_center_span=self.kwargs.get(
+                            "include_center_span", False
+                        ),
+                        initials=(1, 2, 11),
+                        spinbox_decimals=self.kwargs.get("spinbox_decimals", 6),
+                    )
                 )
             else:
                 self.scan_ranges.append(
-                    s.new_intervaled_range(f"range_{name}", n, False, True)
+                    s.new_intervaled_range(
+                        f"range_{name}",
+                        n,
+                        include_sweep_type=self.kwargs.get("include_sweep_type", False),  # override any kwargs
+                        include_center_span=False,  # override any kwargs
+                        spinbox_decimals=self.kwargs.get("spinbox_decimals", 6),
+                    )
                 )
 
         self.add_operation(
@@ -989,6 +1022,7 @@ class SweepNDBase(Measurement):
         # Show appropriate plot type
         show_image = self.settings["position_representation"] == "map_vertical"
         self.img_item.setVisible(show_image)
+        self.hist_lut.setVisible(show_image)
         self.line.setVisible(not show_image)
 
     def set_status(
@@ -1284,6 +1318,11 @@ class SweepNDBase(Measurement):
         self.img_item = pg.ImageItem()
         self.axes.addItem(self.img_item)
         self.img_item.setVisible(False)
+
+        self.hist_lut = pg.HistogramLUTItem()
+        self.hist_lut.setImageItem(self.img_item)
+        self.hist_lut.setVisible(False)
+        graph_widget.addItem(self.hist_lut)
 
         graph_widget.setMinimumSize(1, 1)
         graph_widget.setSizePolicy(
