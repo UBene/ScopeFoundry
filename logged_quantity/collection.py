@@ -317,7 +317,9 @@ class LQCollection:
             )
             LQRange_kwargs.update({"center_lq": center_lq, "span_lq": span_lq})
         if include_sweep_type:
-            sweep_type_lq = self.New(f"{name}_sweep_type", str, choices=("up", "down"))
+            sweep_type_lq = self.New(f"{name}_sweep_type", str, 
+                                     choices=("up", "down"),
+                                     description = "allows to revert the order of the values, go back and forth and more.")
             LQRange_kwargs.update({"sweep_type_lq": sweep_type_lq})
 
         lqrange = LQRange(**LQRange_kwargs)
@@ -377,6 +379,7 @@ class LQCollection:
                 f"{name}_sweep_type",
                 str,
                 choices=("up", "down", "up_down", "down_up", "zig_zag", "zag_zig"),
+                description = "allows to revert the order of the values, go back and forth and more."
             )
         else:
             sweep_type = None
@@ -389,6 +392,7 @@ class LQCollection:
         )
 
         i_range = IntervaledLQRange(lq_ranges, is_active_lqs, no_duplicates, sweep_type)
+        
         self.ranges[name] = i_range
         return i_range
 
