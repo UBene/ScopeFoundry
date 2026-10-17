@@ -716,7 +716,7 @@ class LoggedQuantity(QtCore.QObject):
                         qc = self.qcolors[idx]
                     else:
                         qc = QtGui.QColor("lightgrey")
-                    widget.setStyleSheet(widget.styleSheet() + s)
+                    # widget.setStyleSheet(widget.styleSheet())
 
                 widget.currentIndexChanged.connect(update_background_color)
 
@@ -1529,9 +1529,9 @@ def to_q_color(color, default="lightgrey"):
     except TypeError:
         qcolor = QtGui.QColor(default)
     finally:
-        if qcolor.isValid():
-            return qcolor
-        return QtGui.QColor(default)
+        if not qcolor.isValid():
+            qcolor = QtGui.QColor(default)
+    return qcolor
 
 
 def _expand_choice(c, dtype):
