@@ -64,6 +64,16 @@ class LQDisconnectFromWidgetTest(unittest.TestCase):
         self.assertFalse(widget.isChecked())
         self.assertTrue(self.bool.val)
 
+    def test_label_disconnect(self):
+        widget = QtWidgets.QLabel()
+        self.float.connect_to_widget(widget)
+        self.assertEqual(widget.text(), "0")
+
+        self.float.disconnect_from_widget(widget)
+        self.float.update_value(1.0)
+
+        self.assertEqual(widget.text(), "0")
+
 
 #     def test_pyqtgraph_spinbox(self):
 #         wf = SpinBox()
