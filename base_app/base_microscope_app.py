@@ -1290,6 +1290,11 @@ class BaseMicroscopeApp(BaseApp):
             return
 
         self.set_subwindow_mode()
+        subwins = {
+            "log": self.logging_subwin,
+            "console": self.console_subwin,
+        }
+
         self._suppress_subwin_scaling = True
         for name, win_state in positions.items():
             if name == "view_mode":
@@ -1301,18 +1306,15 @@ class BaseMicroscopeApp(BaseApp):
             elif name == "main":
                 restore_win_state(self.ui, win_state)
                 self.ui.col_splitter.setSizes(win_state["col_splitter_sizes"])
-            elif name.startswith("measurement/"):
+            elif (
+                name.startswith("measurement/")
+                and name.split("/")[-1] in self.measurements
+            ):
                 M = self.measurements[name.split("/")[-1]]
                 restore_win_state(M.subwin, win_state)
+                subwins[name] = M.subwin
         self._suppress_subwin_scaling = False
 
-        subwins = {
-            "log": self.logging_subwin,
-            "console": self.console_subwin,
-        }
-        for name in positions:
-            if name.startswith("measurement/"):
-                subwins[name] = self.measurements[name.split("/")[-1]].subwin
         z_ordered = sorted(
             (n for n in subwins if "z" in positions[n]),
             key=lambda n: positions[n]["z"],
