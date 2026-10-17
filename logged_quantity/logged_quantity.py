@@ -813,19 +813,16 @@ class LoggedQuantity(QtCore.QObject):
 
         self.widget_list.remove(widget)
 
-        has_tracked_connections = False
+        try:
+            widget.customContextMenuRequested.disconnect(self.on_right_click)
+        except (RuntimeError, TypeError):
+            pass
+
         for connection_name in ("to_connection", "from_connection"):
             connection = getattr(widget, connection_name, None)
             if connection is not None:
                 QtCore.QObject.disconnect(connection)
                 delattr(widget, connection_name)
-                has_tracked_connections = True
-
-        if not has_tracked_connections:
-            try:
-                widget.disconnect()
-            except RuntimeError:
-                pass
 
         for sig in [
             self.updated_value,
@@ -841,7 +838,14 @@ class LoggedQuantity(QtCore.QObject):
             for dtype in [float, int, bool, str]:
                 try:
                     sig[dtype].disconnect(widget)
-                except (RuntimeError, TypeError, KeyError, AttributeError):
+                except (RuntimeError, TypeError, KeyError, AttributeError, IndexError):
+                    pass
+
+        if isinstance(widget, QtWidgets.QLabel):
+            for sig in (self.updated_text_value, self.updated_value[str]):
+                try:
+                    sig.disconnect(widget.setText)
+                except (RuntimeError, TypeError):
                     pass
 
     def connect_to_widget_one_way(self, widget):
