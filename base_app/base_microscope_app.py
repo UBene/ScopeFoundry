@@ -1263,9 +1263,10 @@ class BaseMicroscopeApp(BaseApp):
                 restore_win_state(self.ui, win_state)
                 self.ui.col_splitter.setSizes(win_state["col_splitter_sizes"])
             elif name.startswith("measurement/"):
-                M = self.measurements[name.split("/")[-1]]
-                restore_win_state(M.subwin, win_state)
-        self._suppress_subwin_scaling = False
+                mm_name = name.split("/")[-1]
+                if mm_name in self.measurements:
+                    M = self.measurements[mm_name]
+                    restore_win_state(M.subwin, win_state)
 
         subwins = {
             "log": self.logging_subwin,
@@ -1273,7 +1274,9 @@ class BaseMicroscopeApp(BaseApp):
         }
         for name in positions:
             if name.startswith("measurement/"):
-                subwins[name] = self.measurements[name.split("/")[-1]].subwin
+                mm_name = name.split("/")[-1]
+                if mm_name in self.measurements:
+                    subwins[name] = self.measurements[mm_name].subwin
         z_ordered = sorted(
             (n for n in subwins if "z" in positions[n]),
             key=lambda n: positions[n]["z"],
@@ -1289,6 +1292,7 @@ class BaseMicroscopeApp(BaseApp):
         # the active subwindow decides which tab is shown
         if z_ordered:
             self.ui.mdiArea.setActiveSubWindow(subwins[z_ordered[-1]])
+        self._suppress_subwin_scaling = False
 
     def get_window_positions(self) -> Dict[str, Any]:
         positions = OrderedDict()
