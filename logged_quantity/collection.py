@@ -98,8 +98,7 @@ class LQCollection:
         spinbox_decimals: int = 2,
         spinbox_step: float = 0.1,
         colors=None,
-        protected: bool = False,  # a guard that prevents from being updated, i.e. file loading
-        requires_connection: bool = False,  # only writable once hardware is connected, e.g. when loading settings from file it will be set after connection is set.
+        protected: bool = False,  # a guard that prevents from being updated in certain situations, i.e. file loading
         is_dir: bool = False,
         default_dir: str = None,
         file_filters=(),
@@ -109,6 +108,7 @@ class LQCollection:
         is_cmd=False,
         is_clipboardable=False,
         default_widget_factory=None,
+        set_before_connection: bool = None,  # when loading settings from a file, this setting is applied before the hardware connected setting.
         **kwargs,
     ) -> LoggedQuantity:
         """
@@ -120,6 +120,19 @@ class LQCollection:
                 DeprecationWarning,
             )
             is_array = is_array or kwargs.pop("array", False)
+
+        if set_before_connection is None:
+            if self.path.startswith("mm/"):
+                set_before_connection = False
+            elif name.lower() in (
+                "serial_number",
+                "target_serial_number",
+                "com_port",
+                "port",
+            ):
+                set_before_connection = True
+            else:
+                set_before_connection = False
 
         kwargs.update(
             {
@@ -133,7 +146,7 @@ class LQCollection:
                 "fmt": fmt,
                 "description": description,
                 "protected": protected,
-                "requires_connection": requires_connection,
+                "set_before_connection": set_before_connection,
             }
         )
 
