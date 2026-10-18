@@ -93,10 +93,10 @@ class LoggedQuantity(QtCore.QObject):
         description: str = None,
         colors=None,
         protected: bool = False,  # a guard that prevents from being updated, i.e. file loading
-        requires_connection: bool = False,  # only writable once hardware is connected, e.g. when loading settings from file
         is_cmd: bool = False,
         is_clipboardable: bool = False,
         default_widget_factory=None,
+        set_before_connection: bool = False,  # when loading a profile, this setting is applied before the hardware connection is established.
     ):
         QtCore.QObject.__init__(self)
 
@@ -145,7 +145,7 @@ class LoggedQuantity(QtCore.QObject):
         else:
             self.spinbox_decimals = spinbox_decimals
         self.reread_from_hardware_after_write = reread_from_hardware_after_write
-        self.requires_connection = requires_connection
+        self.set_before_connection = set_before_connection
 
         if self.dtype == int:
             self.spinbox_step = 1
@@ -467,7 +467,8 @@ class LoggedQuantity(QtCore.QObject):
                 tips.append(str(s))
         if self.protected:
             tips.append("\n<b>🔒 protected</b>")
-
+        if self.set_before_connection:
+            tips.append("\n🥇 set before connection on file loading</b>")
         tips_str = "\n".join(tips)
         widget.setToolTip(f"<div style='white-space: pre-line;'>{tips_str}</div>")
         return tips

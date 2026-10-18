@@ -1,7 +1,6 @@
 import datetime
 import inspect
 import json
-from functools import partial
 from pathlib import Path
 from shutil import rmtree
 from typing import List
@@ -762,6 +761,8 @@ class ProfileManager:
 
             logged_quantity = self.app.get_lq(path)
             is_read_only = logged_quantity.ro
+            is_protected = logged_quantity.protected
+            is_set_before_connection = logged_quantity.set_before_connection
             current_value = logged_quantity.ini_string_value()
             saved_value = (
                 proposed_values.get(path)
@@ -785,9 +786,17 @@ class ProfileManager:
                 else current_value
             )
             proposed_value = str(proposed_value)
+            flags_indicators = " "
+            if is_protected:
+                flags_indicators += "🔒"
+            elif setting_name == "connected":
+                flags_indicators += "🥈"
+            elif is_set_before_connection:
+                flags_indicators += "🥇"
+
             setting_item = QtWidgets.QTreeWidgetItem(
                 component_items[component_key],
-                [setting_name, value_text, proposed_value],
+                [setting_name + flags_indicators, value_text, proposed_value],
             )
             setting_item.setFlags(
                 setting_item.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable
@@ -808,6 +817,22 @@ class ProfileManager:
             setting_item.setData(1, QtCore.Qt.ItemDataRole.UserRole, comparison_value)
             setting_item.setData(2, QtCore.Qt.ItemDataRole.UserRole, proposed_value)
             setting_item.setToolTip(2, "Click to edit this profile value")
+            setting_item.setToolTip(
+                0,
+                """For loading settings from a file the following flags are relevant:
+
+protected (🔒) : are ignored (even if checked here)
+
+Otherwise the the settings are set in three phases:
+1) settings flagged with set_before_connection (🥇)
+2) "connected" settings (🥈)
+3) all other settings
+
+These flags can be defined at creation: 
+self.settings.New(..., protected=<False/True>, set_before_connection=<None/False/True>, ...)
+- Use protected=True for actuators that can damage your equipment.
+- set_before_connection=None (default): ScopeFoundry assumes that hardware settings with specific names should be set before.""",
+            )
             self._update_proposed_value_style(setting_item, logged_quantity)
             if is_read_only:
                 setting_item.setDisabled(True)
@@ -1066,7 +1091,9 @@ class ProfileManager:
             return False
 
         def save_current_profile(name_override=None, as_copy=False):
-            name = name_override if name_override is not None else current_profile["name"]
+            name = (
+                name_override if name_override is not None else current_profile["name"]
+            )
             if name is None:
                 return save_profile_as()
             name = name.strip()
