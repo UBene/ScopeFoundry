@@ -23,6 +23,9 @@ class Map2D(Sweep2D):
         range_n_intervals=(1, 1),
         n_read_any_settings=2,
         n_any_measurements=2,
+        include_sweep_type: bool = False,
+        include_center_span: bool = True,
+        spinbox_decimals: int = 3,
         invert_h=False,
         invert_v=False,
     ):
@@ -35,6 +38,9 @@ class Map2D(Sweep2D):
             range_n_intervals,
             n_read_any_settings,
             n_any_measurements,
+            include_sweep_type=include_sweep_type,
+            include_center_span=include_center_span,
+            spinbox_decimals=spinbox_decimals,
         )
         self.invert_h = invert_h
         self.invert_v = invert_v
