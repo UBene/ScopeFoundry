@@ -1566,5 +1566,10 @@ class BaseMicroscopeApp(BaseApp):
                 )
         return self.py_analysis_scripts_path
 
-    def get_py_analysis_scripts(self):
-        return self.py_analysis_scripts_path.glob("*.py")
+    def get_py_analysis_scripts(
+        self, patterns=["*.txt", "*.py", "*.mat", "*.md", "*.markdown"]
+    ):
+        files = []
+        for pattern in patterns:
+            files.extend(self.py_analysis_scripts_path.glob(pattern))
+        return files
