@@ -515,6 +515,9 @@ class Sweep1D(SweepNDBase):
         range_n_intervals: Sequence[int] = (1,),
         n_read_any_settings: int = 2,
         n_any_measurements: int = 2,
+        include_sweep_type: bool = True,
+        include_center_span: bool = False,
+        spinbox_decimals: int = 3,
     ):
         # Add flag for average_to_scan_shape setting
         self.add_average_to_scan_shape = True
@@ -529,6 +532,9 @@ class Sweep1D(SweepNDBase):
             range_n_intervals=range_n_intervals,
             n_read_any_settings=n_read_any_settings,
             n_any_measurements=n_any_measurements,
+            include_sweep_type=include_sweep_type,
+            include_center_span=include_center_span,
+            spinbox_decimals=spinbox_decimals,
         )
 
     def setup(self) -> None:
