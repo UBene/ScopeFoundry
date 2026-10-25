@@ -168,7 +168,9 @@ class ProfileManager:
     def _app_implementation_ini_files(self):
         implementation_dir = self._app_implementation_dir()
         return sorted(
-            path for path in implementation_dir.glob("*.ini") if path.is_file()
+            path
+            for path in implementation_dir.glob("*.ini")
+            if path.is_file() and path.name != "tools_defaults.ini"
         )
 
     def initialize_startup_profile(self) -> None:
@@ -311,12 +313,7 @@ class ProfileManager:
         self.selected_profile_name = name
 
     def _read_startup_profile(self) -> str:
-        config_path = self._app_implementation_dir() / ".scopefoundry"
-        try:
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-            name = config.get("startup_profile", "") if isinstance(config, dict) else ""
-        except (OSError, json.JSONDecodeError):
-            name = ""
+        name = self.app.load_microscope_config().get("startup_profile", "")
         if not isinstance(name, str):
             return ""
         if (
@@ -329,22 +326,15 @@ class ProfileManager:
         return ""
 
     def _set_startup_profile(self, name: str) -> None:
-        config_path = self._app_implementation_dir() / ".scopefoundry"
         if name and (
             Path(name).name != name
             or name in (".", "..")
             or not (self.profiles_dir / name / "settings.ini").is_file()
         ):
             raise ValueError(f"Unknown startup profile: {name}")
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            config = {}
-        if not isinstance(config, dict):
-            config = {}
+        config = self.app.load_microscope_config()
         config["startup_profile"] = name
-        config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+        self.app.save_microscope_config(config)
         self.startup_profile_name = name
 
     def update_selected_profile(self, checked: bool = False) -> None:

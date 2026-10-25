@@ -9,7 +9,7 @@ import warnings
 from shutil import copyfile
 
 from collections import OrderedDict
-from functools import partial
+from functools import lru_cache, partial
 from pathlib import Path
 from typing import Any, Dict, List, Protocol
 
@@ -81,6 +81,13 @@ class BaseMicroscopeApp(BaseApp):
         self.settings_icon_path = self.icons_path / "settings_logo.png"
         self.jupyter_logo_path = self.icons_path / "jupyter_logo.png"
 
+        self.implementation_path = get_child_path(self)
+        self.docs_path = self.implementation_path / "docs"
+        safe_name = "".join(c if c.isalnum() or c in "-_ ." else "_" for c in self.name)
+        self.microscope_config_path = (
+            self.implementation_path / f"{safe_name}.scopefoundry"
+        )
+
         self._setup_log_file_handler()
         self._setup_settings_operations(**kwargs)
 
@@ -90,7 +97,7 @@ class BaseMicroscopeApp(BaseApp):
         self.profile_manager = ProfileManager(self)
         self.logo_path = str(self.icons_path / "scopefoundry_logo2B_1024.png")
         self.quickbar = None  # also with self.add_quickbar
-        self.docs_path = get_child_path(self) / "docs"
+
         self.setup()
 
         self._setup_ui_base()
@@ -108,6 +115,18 @@ class BaseMicroscopeApp(BaseApp):
 
         # self.snippets = {}
         # self.descriptive_snippets = ()
+
+    def load_microscope_config(self) -> Dict[str, Any]:
+        try:
+            config = json.loads(self.microscope_config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return config if isinstance(config, dict) else {}
+
+    def save_microscope_config(self, config: Dict[str, Any]) -> None:
+        path = self.microscope_config_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
 
     def setup(self) -> None:
         """Override to add Hardware and Measurement Components"""
@@ -192,7 +211,7 @@ class BaseMicroscopeApp(BaseApp):
                 )
 
     def _setup_settings_operations(self, **kwargs: Any) -> None:
-        initial_save_path = Path.cwd() / "data"
+        initial_save_path = self.implementation_path / "data"
         if not initial_save_path.is_dir():
             initial_save_path.mkdir()
         self.save_dir = self.settings.new_file(
@@ -231,7 +250,7 @@ class BaseMicroscopeApp(BaseApp):
         )
 
     def _setup_log_file_handler(self) -> None:
-        log_path = Path.cwd() / "log"
+        log_path = self.implementation_path / "log"
         if not log_path.is_dir():
             log_path.mkdir()
         _fname = f"{self.name}_log_{datetime.datetime.now():%y%m%d_%H%M%S}.txt"
@@ -1126,7 +1145,7 @@ class BaseMicroscopeApp(BaseApp):
         """
         Loads last saved ini file.
         """
-        fnames = list(Path.cwd().glob("*_settings.ini"))
+        fnames = list(self.implementation_path.glob("*_settings.ini"))
         fnames += list(Path(self.settings["save_dir"]).glob("*_settings.ini"))
         self.settings_load_ini(sorted(fnames)[-1])
 
@@ -1555,7 +1574,7 @@ class BaseMicroscopeApp(BaseApp):
                 cmenu.addAction(name, func)
 
     def _init_py_analysis_directory(self) -> Path:
-        self.py_analysis_scripts_path = self.docs_path.parent / "py_analysis_scripts"
+        self.py_analysis_scripts_path = self.implementation_path / "py_analysis_scripts"
         if not self.py_analysis_scripts_path.exists():
             self.py_analysis_scripts_path.mkdir()
             with open(
@@ -1567,8 +1586,4 @@ class BaseMicroscopeApp(BaseApp):
         return self.py_analysis_scripts_path
 
     def get_py_analysis_scripts(self):
-        return [
-            f
-            for f in self.py_analysis_scripts_path.glob("*")
-            if f.is_file() and not f.name.startswith("__")
-        ]
+        return self.py_analysis_scripts_path.glob("*.py")
