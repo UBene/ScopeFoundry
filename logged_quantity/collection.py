@@ -125,10 +125,11 @@ class LQCollection:
             if self.path.startswith("mm/"):
                 set_before_connection = False
             elif name.lower() in (
+                "com_port",
+                "address",
+                "port",
                 "serial_number",
                 "target_serial_number",
-                "com_port",
-                "port",
             ):
                 set_before_connection = True
             else:
