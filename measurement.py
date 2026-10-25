@@ -716,7 +716,11 @@ class Measurement:
         return self.py_analysis_scripts_path
 
     def get_py_analysis_scripts(self):
-        return self.py_analysis_scripts_path.glob("*.py")
+        return [
+            f
+            for f in self.py_analysis_scripts_path.glob("*")
+            if f.is_file() and not f.name.startswith("__")
+        ]
 
     def get_py_snippet(self) -> str:
         """return a string that gets added underneath the load line in ipynb cells for example:

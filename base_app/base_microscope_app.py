@@ -1566,10 +1566,9 @@ class BaseMicroscopeApp(BaseApp):
                 )
         return self.py_analysis_scripts_path
 
-    def get_py_analysis_scripts(
-        self, patterns=["*.txt", "*.py", "*.mat", "*.md", "*.markdown"]
-    ):
-        files = []
-        for pattern in patterns:
-            files.extend(self.py_analysis_scripts_path.glob(pattern))
-        return files
+    def get_py_analysis_scripts(self):
+        return [
+            f
+            for f in self.py_analysis_scripts_path.glob("*")
+            if f.is_file() and not f.name.startswith("__")
+        ]
