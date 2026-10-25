@@ -315,9 +315,11 @@ class SweepNDBase(Measurement):
             if self.scan_data.current_sweep > 0:
                 scan_data.extend_for_reps(collectors)
 
-            # not sure why this can not be packed in the zip() directly.
             pos_list = list(positions_gen_func())
             base_list = list(base_indices_gen_func())
+            if self.settings["alternate"] and self.scan_data.current_sweep % 2 == 1:
+                pos_list.reverse()
+                base_list.reverse()
 
             progress_index_gen = progress_index_gen_func()
             self.progress_index = next(progress_index_gen)
@@ -792,6 +794,12 @@ class SweepNDBase(Measurement):
             initial=1,
             description="number of additional sweeps remaining, decremented when sweep starts. <p><p> Set a negative value to resweep indefinitely. <p><p>Set to 0 to stop after the current sweep completes.",
         )
+        s.New(
+            "alternate",
+            dtype=bool,
+            initial=False,
+            description="alternate the sweep direction after each sweep - only applicable when multiple sweeps are performed",
+        )
         for i in range(self.n_any_measurements):
             self.collectors.append(
                 AnyMeasurementCollector(self, name=f"any_measurement_{i}")
@@ -1063,6 +1071,7 @@ class SweepNDBase(Measurement):
             "initial_delay",
             "res_in_new_dir",
             "remaining_sweeps",
+            "alternate",
         )
         vlayout.addWidget(self.settings.New_UI(include))
 
