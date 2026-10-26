@@ -937,7 +937,6 @@ class SweepNDBase(Measurement):
         controls_layout.setSpacing(4)
         controls_layout.setContentsMargins(0, 0, 0, 0)
         controls_layout.addWidget(top_widget)
-        controls_layout.addWidget(self.mk_plot_options_widget())
 
         controls_scroll = QtWidgets.QScrollArea()
         controls_scroll.setWidgetResizable(True)
@@ -957,11 +956,20 @@ class SweepNDBase(Measurement):
         controls_scroll.setWidget(controls)
         layout.addWidget(controls_scroll)
 
+        self._compact_widget = QtWidgets.QWidget()
+        self._compact_layout = QtWidgets.QHBoxLayout(self._compact_widget)
         self._compact_start_btn = self.new_start_stop_button()
-        layout.addWidget(self._compact_start_btn)
+        self._expand_btn = QtWidgets.QPushButton("Expand")
+        self._expand_btn.setFixedWidth(100)
+        self._expand_btn.clicked.connect(self.app.toggle_view_mode)
+
+        self._compact_layout.addWidget(self._compact_start_btn)
+        self._compact_layout.addWidget(self._expand_btn)
+        layout.addWidget(self._compact_widget)
 
         plot_row = self.wrap_with_position_list_widget(graph_widget)
         plot_row.setMinimumSize(1, 1)
+        layout.addWidget(self.mk_plot_options_widget())
         layout.addWidget(plot_row, 1)
 
         self._compact_hidden_widgets = [controls_scroll, self._position_list_widget]
@@ -988,7 +996,7 @@ class SweepNDBase(Measurement):
     def _set_compact(self, compact: bool) -> None:
         for w in self._compact_hidden_widgets:
             w.setVisible(not compact)
-        self._compact_start_btn.setVisible(compact)
+        self._compact_widget.setVisible(compact)
 
     def update_display(self) -> None:
         self.update_status_display()
