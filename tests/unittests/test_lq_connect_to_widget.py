@@ -137,6 +137,42 @@ class LQConnectToWidgetTest(unittest.TestCase):
         self.assertEqual(self.float.value, 2.0)
         self.assertEqual(self.int.value, 2)
 
+    def test_qtext_edit(self):
+        widget = QtWidgets.QTextEdit()
+        widget.setText("3")
+
+        self.str.connect_to_widget(widget)
+        self.assertEqual(widget.toPlainText(), "0")
+
+        self.str.update_value("1")
+        self.assertEqual(widget.toPlainText(), "1")
+
+        widget.setText("2")
+        self.assertEqual(self.str.value, "2")
+
+    def test_qprogress_bar(self):
+        lq = self.settings.New("progress", int, initial=5, vmin=0, vmax=100)
+        widget = QtWidgets.QProgressBar()
+        widget.setRange(0, 100)
+        widget.setValue(3)
+
+        lq.connect_to_widget(widget)
+        self.assertEqual(widget.value(), 5)
+
+        lq.update_value(10)
+        self.assertEqual(widget.value(), 10)
+
+    def test_qlcd_number(self):
+        lq = self.settings.New("lcd", int, initial=5)
+        widget = QtWidgets.QLCDNumber()
+        widget.display(3)
+
+        lq.connect_to_widget(widget)
+        self.assertEqual(widget.value(), 5)
+
+        lq.update_value(10)
+        self.assertEqual(widget.value(), 10)
+
     def test_q_plain_text_edit(self):
 
         ws = QtWidgets.QPlainTextEdit()
@@ -207,15 +243,28 @@ class LQConnectToWidgetTest(unittest.TestCase):
         wc.setCurrentIndex(2)
         self.assertEqual(self.choices.value, 3)
 
+    def test_qslider(self):
+        lq = self.settings.New("slider_init", int, initial=5, vmin=-100, vmax=100)
+        widget = QtWidgets.QSlider()
+        widget.setValue(3)
+
+        lq.connect_to_widget(widget)
+
+        self.assertEqual(widget.value(), 5)
+        self.assertEqual(len(lq.prev_vals), 0)
+
+        lq.update_value(7)
+        self.assertEqual(widget.value(), 7)
+
     def test_qslider_int_non_overflow(self):
-        lq = self.settings.New("int2", int, vmin=-100, vmax=100)
+        lq = self.settings.New("int2", int, initial=0, vmin=-100, vmax=100)
 
         wi = QtWidgets.QSlider()
         wi.setValue(3)
 
         # test on connection widget take lq value
         lq.connect_to_widget(wi)
-        self.assertEqual(wi.value(), 0.0)
+        self.assertEqual(wi.value(), 0)
 
         # lq to widget
         lq.update_value(1)
