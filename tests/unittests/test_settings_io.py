@@ -217,25 +217,20 @@ class SettingsIOTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             manager = self.app.profile_manager
             manager.profiles_dir = Path(temp_dir) / "profiles"
-            implementation_dir = Path(temp_dir) / "app"
-            implementation_dir.mkdir()
+            config_path = Path(temp_dir) / "app" / "test.scopefoundry"
             manager.save_profile(
                 "startup choice", setting_paths=[], select_profile=False
             )
             manager.save_profile("last loaded", setting_paths=[], select_profile=False)
 
-            with patch.object(
-                manager, "_app_implementation_dir", return_value=implementation_dir
-            ):
+            with patch.object(self.app, "microscope_config_path", config_path):
                 manager._set_startup_profile("startup choice")
                 manager._set_selected_profile("last loaded")
 
                 self.assertEqual(
-                    json.loads(
-                        (implementation_dir / ".scopefoundry").read_text(
-                            encoding="utf-8"
-                        )
-                    )["startup_profile"],
+                    json.loads(config_path.read_text(encoding="utf-8"))[
+                        "startup_profile"
+                    ],
                     "startup choice",
                 )
                 self.assertEqual(manager._read_startup_profile(), "startup choice")
