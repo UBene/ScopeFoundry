@@ -1,3 +1,27 @@
+ScopeFoundry 2.4.0 2026-10-20
+
+	* Features added:
+		- [base_microscope_app] added subwindow snap buttons (top/bottom/left/right half), taller bold title bars, proportional resizing when the MDI area changes size, and a menu-bar button to switch between subwindow and tabbed modes.
+		- [base_microscope_app] window positions now save stacking order and maximized state.
+		- [profile_manager] added editable partial profiles based on window_positions.json and settings.ini, replacing defaults.ini; profile history records UI setting changes and app shutdown. Added favorite profiles and a detached editor window; Added history, a snapshot profile is created when user changes a logged quantity, Ctrl+U/Ctrl+Y undo and redo profile changes.
+		- [hardware] added an option to connect in a separate thread.
+		- [h5_io/dataset_metadata] updated the file format to version 240, save measurement metadata and settings from measurements without datasets, and identify the measurement that produced datasets.
+		- [logged_quantity] added set_before_connection for file loading, listeners can be restricted to user changes, and connecting a widget now sets its value directly without emitting a change signal.
+		- [operations] operations can now be bound to keyboard shortcuts.
+		- [sweeping] added 1D sweep slicing, sweep types, alternating sweep direction, optional locators, and data reducers for sweeps and Map2D; improved the compact UI, locator positioning, parallel position execution, sweep numbering, and stability.
+		- [tree_widget/widgets] added tree colors and search for logged-quantity paths, including a searchable choice widget. Usage: self.settings.New(... choices=..., default_widget_factory=QSearchComboBox)
+		- [analyze_with_ipynb] analysis scripts can now include non-Python files such as .txt, .mat, and Markdown files.
+		- [base_microscope_app] added an operation to reload code for all components.
+
+	* Fixes:
+		- [base_microscope_app] profile loading now selects the correct tab on first load, handles windows for measurements that are no longer present, and saves window positions more accurately.
+		- [logged_quantity] fixed widget disconnection, including widgets with context menus; added the requires_connection setting.
+		- [measurement] fixed a startup error and improved nested-measurement stability. Moved display updates to the GUI thread.
+		- [sweeping] fixed intervaled-range sweep areas and ensured position-change signals are sent when the target matches the first position.
+		- [h5_io/generate_loaders] fixed duplicate dataset-loader implementation.
+		- Improved test coverage and test cleanup, including settings, 1D sweeps, and nested measurements.
+
+
 ScopeFoundry 2.3.0 2026-09-10
 
 	* Features added:
