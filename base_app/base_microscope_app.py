@@ -257,6 +257,21 @@ class BaseMicroscopeApp(BaseApp):
             self.read_from_hardwares,
             description="reads settings from <b>connected</b> hardwares",
         )
+        self.add_operation(
+            "Reload_Codes",
+            self.reload_codes,
+            description="reloads modules for all hardware and measurements",
+            icon_path=QtWidgets.QApplication.style().standardIcon(
+                QtWidgets.QStyle.StandardPixmap.SP_BrowserReload
+            ),
+            keyboard_shortcut="Ctrl+R",
+        )
+
+    def reload_codes(self):
+        for hw in self.hardware.values():
+            hw.reload_code()
+        for meas in self.measurements.values():
+            meas.reload_code()
 
     def _setup_log_file_handler(self) -> None:
         log_path = self.implementation_path / "log"
@@ -349,7 +364,11 @@ class BaseMicroscopeApp(BaseApp):
         settings_btn = QtWidgets.QPushButton(" settings")
         settings_btn.clicked.connect(self.show_app_settings)
         settings_btn.setIcon(QtGui.QIcon(str(self.settings_icon_path)))
+        relaod_btn = self.operations.new_button("Reload_Codes")
+        relaod_btn.setText("")
+        relaod_btn.setFixedWidth(20)
         app_widget_btns_layout = QtWidgets.QHBoxLayout()
+        app_widget_btns_layout.addWidget(relaod_btn)
         app_widget_btns_layout.addWidget(ipynb_btn)
         app_widget_btns_layout.addWidget(settings_btn)
         app_widget.layout().addLayout(app_widget_btns_layout)
