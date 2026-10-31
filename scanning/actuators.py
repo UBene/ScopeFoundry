@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Tuple, Union
 
 from ScopeFoundry.base_app import BaseMicroscopeApp
@@ -72,7 +73,7 @@ def mk_actuator_func(
     if callable(write_info):
         write_func = write_info
     else:
-        write_func = app.get_lq(write_info).update_value
+        write_func = partial(app.get_lq(write_info).update_value, send_signal=True)
 
     if read_info is None:
         read_func = lambda: 0

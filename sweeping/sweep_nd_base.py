@@ -9,6 +9,8 @@ from functools import partial
 import matplotlib.pyplot as plt
 import numpy as np
 import pyqtgraph as pg
+from qtpy import QtWidgets
+from ScopeFoundry.widgets import QSearchableComboBox
 from qtpy import QtCore, QtWidgets, QtGui
 
 from ScopeFoundry import BaseMicroscopeApp, Measurement
@@ -815,7 +817,12 @@ class SweepNDBase(Measurement):
 
         self.scan_ranges = []
         for name, n in zip(self.actuator_names, self.range_n_intervals):
-            s.New(f"actuator_{name}", dtype=str, choices=["none"])
+            s.New(
+                f"actuator_{name}",
+                dtype=str,
+                choices=["none"],
+                default_widget_factory=QSearchableComboBox,
+            )
             s.New(
                 f"from_list_{name}",
                 dtype=bool,

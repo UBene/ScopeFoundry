@@ -146,7 +146,6 @@ class Sweep1DSlicer:
         v_slice_layout.addWidget(self.clear_v_slices_btn)
 
         layout.addWidget(v_slice_gb)
-
         return container
 
     def mk_h_slice_plot_widget(self):
@@ -182,6 +181,10 @@ class Sweep1DSlicer:
 
         layout.addWidget(graph_widget)
         self._slice_widget = self.mk_slice_widget()
+        self._slice_widget.setVisible(
+            self.settings["position_representation"] == "map_vertical"
+        )
+
         layout.addWidget(self._slice_widget)
         self._slice_wrap_layout = layout
         self.update_position_representation()
