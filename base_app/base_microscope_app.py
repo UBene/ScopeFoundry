@@ -18,6 +18,7 @@ from qtpy import QtCore, QtGui, QtWidgets
 from ScopeFoundry import h5_io, ini_io
 from ScopeFoundry.base_app.auto_color import auto_color
 from ScopeFoundry.dynamical_widgets import new_tree_widget, new_widget
+from ScopeFoundry.dynamical_widgets.tree_widget import SearchField
 from ScopeFoundry.h5_analyze_with_ipynb import generate_loaders_py, update_ipynb
 from ScopeFoundry.helper_funcs import (
     OrderedAttrDict,
@@ -346,6 +347,11 @@ class BaseMicroscopeApp(BaseApp):
         app_widget.layout().addLayout(app_widget_btns_layout)
         app_widget.setObjectName("app_settings")
         app_widget.setTitle("to inspect drop a .h5 or .ini, to load also press ctrl")
+
+        self.tree_search_field = SearchField(
+            self.hw_tree, self.mm_tree, placeholder="search path, e.g. hw/power…"
+        )
+        self.ui.tree_layout.addWidget(self.tree_search_field)
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         splitter.addWidget(self.hw_tree)
