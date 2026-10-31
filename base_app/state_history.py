@@ -6,7 +6,7 @@ from pathlib import Path
 
 from functools import partial
 
-from qtpy import QtCore, QtGui, QtWidgets
+from qtpy import QtGui, QtWidgets
 
 from ScopeFoundry import ini_io
 
@@ -33,20 +33,24 @@ class StateHistory:
         self.undo_action.setIcon(
             self._blue_icon(QtWidgets.QStyle.StandardPixmap.SP_ArrowBack)
         )
-        self.undo_action.setShortcut("Ctrl+Z")
-        self.undo_action.setShortcutContext(
-            QtCore.Qt.ShortcutContext.ApplicationShortcut
-        )
         self.undo_action.triggered.connect(self.undo_latest)
+        self.app.add_operation(
+            "Undo",
+            self.undo_latest,
+            description="restores the previous state from the history",
+            keyboard_shortcut="Ctrl+U",
+        )
         self.redo_action = menu_bar.addAction("Forward")
         self.redo_action.setIcon(
             self._blue_icon(QtWidgets.QStyle.StandardPixmap.SP_ArrowForward)
         )
-        self.redo_action.setShortcuts(["Ctrl+Y", "Ctrl+Shift+Z"])
-        self.redo_action.setShortcutContext(
-            QtCore.Qt.ShortcutContext.ApplicationShortcut
-        )
         self.redo_action.triggered.connect(self.redo_latest)
+        self.app.add_operation(
+            "Forward",
+            self.redo_latest,
+            description="re-applies the state that was undone",
+            keyboard_shortcut="Ctrl+Y",
+        )
         self.refresh_menu()
 
     def _blue_icon(self, standard_pixmap) -> QtGui.QIcon:
@@ -133,7 +137,7 @@ class StateHistory:
             self.undo_action.setEnabled(idx > 0)
             hint = self._history_item_text(entries[idx - 1][1]) if idx > 0 else ""
             self.undo_action.setToolTip(
-                f"Undo (Ctrl+Z): restore {hint}" if hint else "Undo (nothing to undo)"
+                f"Undo (Ctrl+U): restore {hint}" if hint else "Undo (nothing to undo)"
             )
             self.undo_action.setStatusTip(hint)
         if self.redo_action is not None:

@@ -1,4 +1,5 @@
 import datetime
+from importlib.metadata import metadata
 import inspect
 import json
 from pathlib import Path
@@ -9,6 +10,8 @@ from qtpy import QtCore, QtGui, QtWidgets
 
 from ScopeFoundry import h5_io, ini_io
 from ScopeFoundry.base_app.state_history import StateHistory
+from ScopeFoundry.helper_funcs import matches_search_terms
+from ScopeFoundry.widgets import SearchField
 
 
 class _ProposedValueDelegate(QtWidgets.QStyledItemDelegate):
@@ -134,6 +137,53 @@ class _ProfileTreeHeader(QtWidgets.QHeaderView):
         self._load_file_button.setVisible(file_button_width > 0)
 
 
+class _FavoriteBackgroundOverlay(QtWidgets.QWidget):
+    """Paints a soft rounded background behind the favorite profile actions.
+
+    QMenuBar cannot style single actions, so this click-through overlay tracks
+    the action geometries of the menu bar and tints them.
+    """
+
+    def __init__(self, menu_bar, actions_getter):
+        super().__init__(menu_bar)
+        self._menu_bar = menu_bar
+        self._actions_getter = actions_getter
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_NoSystemBackground)
+        menu_bar.installEventFilter(self)
+        self.setGeometry(menu_bar.rect())
+        self.show()
+        self.raise_()
+
+    def eventFilter(self, watched, event):
+        if event.type() in (
+            QtCore.QEvent.Type.Resize,
+            QtCore.QEvent.Type.LayoutRequest,
+            QtCore.QEvent.Type.ActionAdded,
+            QtCore.QEvent.Type.ActionRemoved,
+            QtCore.QEvent.Type.ActionChanged,
+            QtCore.QEvent.Type.Show,
+        ):
+            self.setGeometry(self._menu_bar.rect())
+            self.raise_()
+            self.update()
+        return super().eventFilter(watched, event)
+
+    def paintEvent(self, event):
+        background = self._menu_bar.palette().color(QtGui.QPalette.ColorRole.Window)
+        color = QtGui.QColor("#4A90D9" if background.lightness() > 127 else "#70BFFF")
+        color.setAlpha(15)
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        painter.setPen(QtCore.Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        for action in self._actions_getter():
+            rect = self._menu_bar.actionGeometry(action).adjusted(2, 3, -2, -3)
+            if rect.isValid():
+                painter.drawRoundedRect(rect, 5, 5)
+        painter.end()
+
+
 class ProfileManager:
     def __init__(self, app):
         self.app = app
@@ -244,12 +294,13 @@ class ProfileManager:
         self._set_startup_profile("start_up")
 
     def setup_menu(self, menu_bar: QtWidgets.QMenuBar) -> None:
+        self._menu_bar = menu_bar
         self.profile_menu = menu_bar.addMenu("Profiles")
         background = self.profile_menu.palette().color(QtGui.QPalette.ColorRole.Window)
         blue = "#0057B8" if background.lightness() > 127 else "#70BFFF"
         self.profile_menu.setStyleSheet(f"QMenu::item:checked {{ color: {blue}; }}")
-        self.refresh_menu()
         self.history.setup_menu(menu_bar)
+        self.refresh_menu()
 
     def refresh_menu(self) -> None:
         if self.profile_menu is None:
@@ -266,6 +317,7 @@ class ProfileManager:
             )
             self.profile_action_group.addAction(action)
         self.profile_menu.addSeparator()
+        self.profile_menu.addAction("New profile...", self.new_profile_from_current)
         self.profile_menu.addAction("New from file...", self.new_profile_from_file)
         self.profile_menu.addAction("Edit profiles...", self.edit_profiles_dialog)
         has_selected_profile = bool(
@@ -278,6 +330,40 @@ class ProfileManager:
             "Update selected profile with current values", self.update_selected_profile
         )
         update_action.setEnabled(has_selected_profile)
+        self._refresh_favorite_buttons()
+
+    def _refresh_favorite_buttons(self) -> None:
+        menu_bar = getattr(self, "_menu_bar", None)
+        if menu_bar is None:
+            return
+        for action in getattr(self, "_favorite_actions", []):
+            menu_bar.removeAction(action)
+            action.deleteLater()
+        self._favorite_actions = []
+
+        redo_action = self.history.redo_action
+        if redo_action is None:
+            return
+        actions = menu_bar.actions()
+        redo_index = actions.index(redo_action)
+        before = actions[redo_index + 1] if redo_index + 1 < len(actions) else None
+
+        for profile_name in self._profile_names():
+            if not self._read_profile_metadata(profile_name)["favorite"]:
+                continue
+            action = QtGui.QAction(profile_name, menu_bar)
+            action.setToolTip(f"Load profile '{profile_name}'")
+            action.triggered.connect(
+                lambda _checked=False, name=profile_name: self.load_profile(name)
+            )
+            menu_bar.insertAction(before, action)
+            self._favorite_actions.append(action)
+        overlay = getattr(self, "_favorite_overlay", None)
+        if overlay is None:
+            overlay = self._favorite_overlay = _FavoriteBackgroundOverlay(
+                menu_bar, lambda: self._favorite_actions
+            )
+        overlay.update()
 
     def _profile_names(self) -> List[str]:
         if not self.profiles_dir.is_dir():
@@ -337,6 +423,41 @@ class ProfileManager:
         self.app.save_microscope_config(config)
         self.startup_profile_name = name
 
+    @staticmethod
+    def _default_profile_metadata() -> dict:
+        return {
+            "load_window_positions": True,
+            "adjust_main_window_size": False,
+            "favorite": False,
+        }
+
+    def _read_profile_metadata(self, name) -> dict:
+        metadata = self._default_profile_metadata()
+        if not name:
+            return metadata
+        try:
+            saved = json.loads(
+                (self.profiles_dir / name / "metadata.json").read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            return metadata
+        if isinstance(saved, dict):
+            for key in metadata:
+                if isinstance(saved.get(key), bool):
+                    metadata[key] = saved[key]
+        return metadata
+
+    def _write_profile_metadata(self, name: str, metadata: dict) -> None:
+        path = self.profiles_dir / name / "metadata.json"
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+        if not isinstance(existing, dict):
+            existing = {}
+        existing.update(metadata)
+        path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
+
     def update_selected_profile(self, checked: bool = False) -> None:
         name = self.selected_profile_name
         settings_path = self.profiles_dir / name / "settings.ini"
@@ -344,6 +465,11 @@ class ProfileManager:
             return
         saved_paths = ini_io.load_settings(settings_path)
         self.save_profile(name, setting_paths=list(saved_paths))
+
+    def new_profile_from_current(self, checked: bool = False) -> None:
+        """Open the editor with a new profile holding the current values, with
+        connected hardware and the selected measurement checked and expanded."""
+        self.edit_profiles_dialog(new_profile=True)
 
     def new_profile_from_file(self, checked: bool = False) -> None:
         source_file = self.app.settings_select_file_dialog()
@@ -962,6 +1088,7 @@ self.settings.New(..., protected=<False/True>, set_before_connection=<None/False
         initial_values=None,
         initial_name=None,
         initial_selected_paths=None,
+        new_profile: bool = False,
     ) -> None:
         selected_measurement = self._selected_measurement_name()
         default_name = f"{datetime.date.today():%Y%m%d}"
@@ -1011,15 +1138,74 @@ self.settings.New(..., protected=<False/True>, set_before_connection=<None/False
         selector_row.addWidget(profile_selector, 1)
         selector_row.addWidget(apply_button)
         form.addRow("Existing profile:", selector_row)
+        favorite_checkbox = QtWidgets.QCheckBox("Show as button in the menu bar")
+        form.addRow("Favorite:", favorite_checkbox)
         startup_profile_selector = QtWidgets.QComboBox()
         layout.addLayout(form)
 
-        tree_layout = QtWidgets.QVBoxLayout()
-        layout.addLayout(tree_layout, 1)
+        tabs = QtWidgets.QTabWidget()
+        settings_tab = QtWidgets.QWidget()
+        tree_layout = QtWidgets.QVBoxLayout(settings_tab)
+        tree_layout.setContentsMargins(0, 0, 0, 0)
+        search_field = SearchField()
+        tree_layout.addWidget(search_field)
+        tabs.addTab(settings_tab, "Settings")
+
+        window_tab = QtWidgets.QWidget()
+        window_tab_layout = QtWidgets.QVBoxLayout(window_tab)
+        load_positions_checkbox = QtWidgets.QCheckBox("Load window positions")
+        adjust_size_checkbox = QtWidgets.QCheckBox("Adjust size of the main window")
+        adjust_size_checkbox.setEnabled(False)
+        load_positions_checkbox.toggled.connect(adjust_size_checkbox.setEnabled)
+        window_tab_layout.addWidget(load_positions_checkbox)
+        window_tab_layout.addWidget(adjust_size_checkbox)
+        window_tab_layout.addStretch(1)
+        tabs.addTab(window_tab, "Window layout")
+        layout.addWidget(tabs, 1)
+
         current_tree = {"widget": None, "settings": {}}
         current_profile = {"name": None, "pending_import": False}
         suggested_profile_name = {"value": initial_name or default_name}
-        baseline = {"paths": set(), "values": {}}
+        baseline = {"paths": set(), "values": {}, "metadata": {}}
+
+        def current_metadata():
+            return {
+                "load_window_positions": load_positions_checkbox.isChecked(),
+                "adjust_main_window_size": adjust_size_checkbox.isChecked(),
+                "favorite": favorite_checkbox.isChecked(),
+            }
+
+        def show_metadata(metadata):
+            favorite_checkbox.setChecked(metadata["favorite"])
+            load_positions_checkbox.setChecked(metadata["load_window_positions"])
+            adjust_size_checkbox.setChecked(metadata["adjust_main_window_size"])
+
+        def apply_search(text=None):
+            tree = current_tree["widget"]
+            if tree is None:
+                return
+            query = (search_field.text() if text is None else text).lower().split()
+            for i in range(tree.topLevelItemCount()):
+                category = tree.topLevelItem(i)
+                category_visible = False
+                for j in range(category.childCount()):
+                    component = category.child(j)
+                    component_visible = False
+                    for k in range(component.childCount()):
+                        setting = component.child(k)
+                        path = setting.data(0, QtCore.Qt.ItemDataRole.UserRole)
+                        visible = matches_search_terms(path, query)
+                        setting.setHidden(not visible)
+                        component_visible = component_visible or visible
+                    component.setHidden(not component_visible)
+                    if query and component_visible:
+                        component.setExpanded(True)
+                    category_visible = category_visible or component_visible
+                category.setHidden(not category_visible)
+                if query and category_visible:
+                    category.setExpanded(True)
+
+        search_field.textChanged.connect(apply_search)
 
         def show_tree(selected_paths=None, proposed_values=None):
             tree, _, setting_items = self._make_settings_tree(
@@ -1041,6 +1227,7 @@ self.settings.New(..., protected=<False/True>, set_before_connection=<None/False
             tree_layout.addWidget(tree)
             current_tree["widget"] = tree
             current_tree["settings"] = setting_items
+            apply_search()
 
         def checked_paths():
             return {
@@ -1051,6 +1238,7 @@ self.settings.New(..., protected=<False/True>, set_before_connection=<None/False
 
         def capture_baseline():
             baseline["paths"] = checked_paths()
+            baseline["metadata"] = current_metadata()
             baseline["values"] = {}
             tree = current_tree["widget"]
             signals_were_blocked = tree.blockSignals(True)
@@ -1067,6 +1255,8 @@ self.settings.New(..., protected=<False/True>, set_before_connection=<None/False
             if current_tree["widget"] is None:
                 return False
             if current_profile["pending_import"]:
+                return True
+            if current_metadata() != baseline["metadata"]:
                 return True
             selected = checked_paths()
             if selected != baseline["paths"]:
@@ -1135,6 +1325,8 @@ self.settings.New(..., protected=<False/True>, set_before_connection=<None/False
                 and old_name == self.startup_profile_name
             ):
                 self._set_startup_profile(name)
+            self._write_profile_metadata(name, current_metadata())
+            self.refresh_menu()
             if not as_copy and old_dir is not None and old_name != name:
                 rmtree(old_dir)
                 self.refresh_menu()
@@ -1231,6 +1423,7 @@ self.settings.New(..., protected=<False/True>, set_before_connection=<None/False
             current_profile["pending_import"] = proposed_values is not None
             suggested_profile_name["value"] = display_name or default_name
             delete_button.setEnabled(False)
+            show_metadata(self._read_profile_metadata(None))
             show_tree(selected_paths, proposed_values)
             if load_current:
                 load_current_values()
@@ -1252,6 +1445,7 @@ self.settings.New(..., protected=<False/True>, set_before_connection=<None/False
             current_profile["name"] = name
             current_profile["pending_import"] = False
             delete_button.setEnabled(settings_path.is_file())
+            show_metadata(self._read_profile_metadata(name))
             show_tree(selected_paths, saved_values)
             capture_baseline()
 
@@ -1420,6 +1614,8 @@ self.settings.New(..., protected=<False/True>, set_before_connection=<None/False
                 display_name=initial_name,
                 load_current=False,
             )
+        elif new_profile:
+            set_new_profile(confirm=False)
         else:
             initial_profile = self.selected_profile_name
             if initial_profile not in self._profile_names():
@@ -1507,6 +1703,24 @@ self.settings.New(..., protected=<False/True>, set_before_connection=<None/False
         self._set_selected_profile(name)
         self.refresh_menu()
 
+        metadata_path = profile_dir / "metadata.json"
+        metadata = {}
+        if metadata_path.is_file():
+            with open(metadata_path, "r") as f:
+                metadata.update(json.load(f))
+        if metadata.get("load_window_positions", True):
+            return
+
         positions_path = profile_dir / "window_positions.json"
+        if not positions_path.is_file():
+            QtWidgets.QMessageBox.warning(
+                self.app.ui,
+                "Profile window_positions file not found",
+                f"Could not find the window positions file for profile '{name}':\n"
+                f"{positions_path}",
+            )
+            return
+
+        adjust_main_window_size = metadata.get("adjust_main_window_size", True)
         if positions_path.is_file():
-            self.app.load_window_positions_json(positions_path)
+            self.app.load_window_positions_json(positions_path, adjust_main_window_size)

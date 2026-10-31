@@ -1323,7 +1323,9 @@ class BaseMicroscopeApp(BaseApp):
         )
         return self.settings.as_dict()
 
-    def set_window_positions(self, positions: Dict[str, Any]) -> None:
+    def set_window_positions(
+        self, positions: Dict[str, Any], adjust_main_window_size: bool = True
+    ) -> None:
         def restore_win_state(subwin: QtWidgets.QMdiSubWindow, win_state):
             subwin.showNormal()
             if win_state.get("fullscreen", False):
@@ -1337,7 +1339,7 @@ class BaseMicroscopeApp(BaseApp):
 
         if not self.mdi:
             main_state = positions.get("main", {})
-            if main_state:
+            if main_state and adjust_main_window_size:
                 restore_win_state(self.ui, main_state)
             return
 
@@ -1350,7 +1352,7 @@ class BaseMicroscopeApp(BaseApp):
                 restore_win_state(self.logging_subwin, win_state)
             elif name == "console":
                 restore_win_state(self.console_subwin, win_state)
-            elif name == "main":
+            elif name == "main" and adjust_main_window_size:
                 restore_win_state(self.ui, win_state)
                 self.ui.col_splitter.setSizes(win_state["col_splitter_sizes"])
             elif name.startswith("measurement/"):
@@ -1430,16 +1432,18 @@ class BaseMicroscopeApp(BaseApp):
         with open(fname, "w") as outfile:
             json.dump(positions, outfile, indent=4)
 
-    def load_window_positions_json(self, fname: str) -> None:
+    def load_window_positions_json(
+        self, fname: str, adjust_main_window_size: bool = True
+    ) -> None:
         with open(fname, "r") as infile:
             positions = json.load(infile)
-        self.set_window_positions(positions)
+        self.set_window_positions(positions, adjust_main_window_size)
 
     def window_positions_load_dialog(self) -> None:
         fname, selectedFilter = QtWidgets.QFileDialog.getOpenFileName(
             self.ui, "Open Window Position file", "", "position File (*.json)"
         )
-        self.load_window_positions_json(fname)
+        self.load_window_positions_json(fname, adjust_main_window_size=True)
 
     def window_positions_save_dialog(self) -> None:
         """Opens a save as ini dialogue in the app user interface."""
