@@ -126,7 +126,14 @@ class Measurement:
             op_func=self.show_ui,
             icon_path=self.app.icons_path / "show_ui_logo.png",
         )
-        self.add_operation("Reload_Code", self.reload_code)
+        self.add_operation(
+            "Reload_Code",
+            self.reload_code,
+            description=f"Reloads {self.__class__.__name__}",
+            icon_path=QtWidgets.QApplication.style().standardIcon(
+                QtWidgets.QStyle.StandardPixmap.SP_BrowserReload
+            ),
+        )
 
         if hasattr(self, "ui_filename"):
             self.load_ui()
@@ -532,7 +539,12 @@ class Measurement:
         return btn
 
     def add_operation(
-        self, name: str, op_func: Callable[[], None], description="", icon_path=""
+        self,
+        name: str,
+        op_func: Callable[[], None],
+        description="",
+        icon_path="",
+        keyboard_shortcut: str = None,
     ):
         """
         Create an operation for the Measurement.
@@ -545,7 +557,7 @@ class Measurement:
         :type op_func: QtCore.Slot or Callable without Argument
         :type description: str
         """
-        self.operations.new(name, op_func, description, icon_path)
+        self.operations.new(name, op_func, description, icon_path, keyboard_shortcut)
 
     def remove_operation(self, name: str):
         self.operations.remove(name)

@@ -108,6 +108,7 @@ class BaseMicroscopeApp(BaseApp):
             self._setup_ui_mdi_area()
         self._setup_ui_menu_bar()
         self.setup_ui()  # child may overrite
+        self._register_operation_shortcuts()
         self._post_setup_ui_quickaccess()
         self._setup_ui_logo()
         self._add_docs_to_help_menu()
@@ -116,6 +117,12 @@ class BaseMicroscopeApp(BaseApp):
 
         # self.snippets = {}
         # self.descriptive_snippets = ()
+
+    def _register_operation_shortcuts(self) -> None:
+        """QShortcut needs a widget parent, available once the main window exists."""
+        self.operations.set_shortcut_parent(self.ui)
+        for component in (*self.hardware.values(), *self.measurements.values()):
+            component.operations.set_shortcut_parent(self.ui)
 
     def load_microscope_config(self) -> Dict[str, Any]:
         try:
@@ -240,6 +247,7 @@ class BaseMicroscopeApp(BaseApp):
             self.on_analyze_with_ipynb,
             "generates h5_data_loaders.py, overview.ipynb, and tries to launch overview.ipynb (vscode with jupyter extension recommended)",
             self.jupyter_logo_path,
+            keyboard_shortcut="Ctrl+I",
         )
         self.settings.New(
             "ipynb_option", str, initial="last", choices=["all", "last", "remaining"]

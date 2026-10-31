@@ -391,6 +391,7 @@ class BaseApp(QtCore.QObject):
         op_func: Callable[[], None],
         description: str = "",
         icon_path: str = "",
+        keyboard_shortcut: str = None,
     ) -> None:
         """
         Create an operation for the App.
@@ -403,7 +404,7 @@ class BaseApp(QtCore.QObject):
         :type op_func: QtCore.Slot or Callable without Argument
         :type description: str
         """
-        self.operations.new(name, op_func, description, icon_path)
+        self.operations.new(name, op_func, description, icon_path, keyboard_shortcut)
 
     def remove_operation(self, name: str) -> None:
         self.operations.remove(name)

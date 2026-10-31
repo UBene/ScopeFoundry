@@ -80,12 +80,18 @@ class HardwareComponent:
         if self.auto_thread_lock:
             self.thread_lock_all_lq()
 
-
         self.q_object = HardwareQObject()
         self.connection_succeeded = self.q_object.connection_succeeded
         self.connection_failed = self.q_object.connection_failed
 
-        self.add_operation("Reload Code", self.reload_code)
+        self.add_operation(
+            "Reload Code",
+            self.reload_code,
+            description=f"Reloads {self.__class__.__name__}",
+            icon_path=QtWidgets.QApplication.style().standardIcon(
+                QtWidgets.QStyle.StandardPixmap.SP_BrowserReload
+            ),
+        )
         self.add_operation("Read from\nHardware", self.read_from_hardware)
 
         self.q_object.connection_failed.connect(self.on_connection_failed)
@@ -131,7 +137,6 @@ class HardwareComponent:
             except Exception as err:
                 self.set_connection_status("⚠", "red")
                 raise err
-
 
     def _connect_worker(self) -> None:
         try:
@@ -245,7 +250,12 @@ class HardwareComponent:
         add_to_layout(self, layout, include, exclude)
 
     def add_operation(
-        self, name: str, op_func: Callable[[], None], description="", icon_path=""
+        self,
+        name: str,
+        op_func: Callable[[], None],
+        description="",
+        icon_path="",
+        keyboard_shortcut: str = None,
     ):
         """
         Create an operation for the HardwareComponent.
@@ -258,7 +268,7 @@ class HardwareComponent:
         :type op_func: QtCore.Slot or Callable without Argument
         :type description: str
         """
-        self.operations.new(name, op_func, description, icon_path)
+        self.operations.new(name, op_func, description, icon_path, keyboard_shortcut)
 
     def remove_operation(self, name):
         self.operations.remove(name)
