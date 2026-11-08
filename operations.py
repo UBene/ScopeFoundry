@@ -54,6 +54,14 @@ class Operations:
         for op in self._operations.values():
             self._register_shortcut(op)
 
+    def clear_shortcuts(self) -> None:
+        """Remove shortcuts when their owning component is removed."""
+        for shortcut in self._shortcuts.values():
+            shortcut.setEnabled(False)
+            shortcut.deleteLater()
+        self._shortcuts.clear()
+        self._shortcut_parent = None
+
     def _register_shortcut(self, operation: Operation) -> None:
         if (
             not operation.keyboard_shortcut

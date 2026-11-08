@@ -944,6 +944,7 @@ class BaseMicroscopeApp(BaseApp):
             from ScopeFoundry.dynamical_widgets.tree_widget import SubtreeManager
 
             SubtreeManager(self.hw_tree, hw)
+            hw.operations.set_shortcut_parent(self.ui)
 
         return hw
 
@@ -972,6 +973,7 @@ class BaseMicroscopeApp(BaseApp):
         hw._widgets_managers_.clear()
 
         self.remove_lq_collection_from_settings_path(hw.settings)
+        hw.operations.clear_shortcuts()
 
         del self.hardware[name]
 
@@ -1003,6 +1005,7 @@ class BaseMicroscopeApp(BaseApp):
             from ScopeFoundry.dynamical_widgets.tree_widget import SubtreeManager
 
             SubtreeManager(self.mm_tree, measure)
+            measure.operations.set_shortcut_parent(self.ui)
 
         if self.mdi and hasattr(self, "ui"):
             ui = self.load_measure_ui(measure)
@@ -1066,8 +1069,11 @@ class BaseMicroscopeApp(BaseApp):
                 break
 
         self.remove_lq_collection_from_settings_path(measure.settings)
+        measure.operations.clear_shortcuts()
 
         del self.measurements[name]
+        if hasattr(self, "dynamic_components"):
+            self.dynamic_components.removed("measurement", name)
 
         self.log.info(f"Measurement {name} removed")
 
