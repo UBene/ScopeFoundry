@@ -111,6 +111,10 @@ class BaseMicroscopeApp(BaseApp):
 
             ipynb_analysis = IpynbAnalysisMeasurement(self)
             self.add_measurement(ipynb_analysis)
+
+        from .component_picker import DynamicComponents
+
+        self.dynamic_components = DynamicComponents(self)
         self._setup_ui_base()
         self._setup_ui_buttons()
         self._setup_ui_tree_column()
@@ -124,6 +128,7 @@ class BaseMicroscopeApp(BaseApp):
         self._post_setup_ui_quickaccess()
         self._setup_ui_logo()
         self._add_docs_to_help_menu()
+        self.dynamic_components.restore()
         self.profile_manager.initialize_startup_profile()
 
         # self.snippets = {}
@@ -407,10 +412,10 @@ class BaseMicroscopeApp(BaseApp):
         relaod_btn = self.operations.new_button("Reload_Codes")
         relaod_btn.setText("")
         relaod_btn.setFixedWidth(20)
-        app_widget_btns_layout = QtWidgets.QHBoxLayout()
-        app_widget_btns_layout.addWidget(relaod_btn)
-        app_widget_btns_layout.addWidget(settings_btn)
-        app_widget.layout().addLayout(app_widget_btns_layout)
+        self._app_widget_buttons_layout = QtWidgets.QHBoxLayout()
+        self._app_widget_buttons_layout.addWidget(relaod_btn)
+        self._app_widget_buttons_layout.addWidget(settings_btn)
+        app_widget.layout().addLayout(self._app_widget_buttons_layout)
         app_widget.setObjectName("app_settings")
         app_widget.setTitle("to inspect drop a .h5 or .ini, to load also press ctrl")
 
@@ -418,6 +423,9 @@ class BaseMicroscopeApp(BaseApp):
             self.hw_tree, self.mm_tree, placeholder="search path, e.g. hw/power…"
         )
         self.ui.tree_layout.addWidget(self.tree_search_field)
+        self.add_component_button = QtWidgets.QPushButton("Add or remove components...")
+        self.add_component_button.clicked.connect(self.dynamic_components.show_picker)
+        self.ui.tree_layout.addWidget(self.add_component_button)
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         splitter.addWidget(self.hw_tree)
@@ -484,6 +492,9 @@ class BaseMicroscopeApp(BaseApp):
         )
         self.ui.menuAdvanced.addAction(
             "new measurement", partial(self.start_tools, "new measurement")
+        )
+        self.ui.menuAdvanced.addAction(
+            "Edit saved components...", self.dynamic_components.show_saved_editor
         )
         self.ui.menuAdvanced.addAction(
             "publish hardware", partial(self.start_tools, "publish HW on GitHub")
@@ -924,6 +935,8 @@ class BaseMicroscopeApp(BaseApp):
         hw.operations.clear_shortcuts()
 
         del self.hardware[name]
+        
+        self.dynamic_components.removed("hardware", name)
 
         self.log.info(f"Hardware {name} removed")
 

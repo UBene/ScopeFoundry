@@ -58,6 +58,7 @@ setup(
             "*.png",
             "*.svg",
             "*.qss",
+            "builtin_components.json",
             # for ScopeFoundry tools
             "_LICENSE",
             "*.md",
