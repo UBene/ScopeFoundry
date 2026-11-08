@@ -45,6 +45,10 @@ from .logging_handlers import StatusBarHandler, new_log_file_handler
 from .show_io_report_dialog import show_io_report_dialog
 
 
+class ComponentAlreadyExistsError(ValueError):
+    """A hardware component or measurement conflicts with an existing entry."""
+
+
 class MeasurementProtocol(Protocol):
     name: str
     settings: LQCollection
@@ -923,7 +927,9 @@ class BaseMicroscopeApp(BaseApp):
         """Loads a HardwareComponent object into the app.
 
         If *hw* is a class, rather an instance, create an instance
-        and add it to self.hardware
+        and add it to self.hardware.
+
+        Raises ComponentAlreadyExistsError if its name is already registered.
         """
         # If *hw* is a class, rather an instance, create an instance
         if inspect.isclass(hw):
@@ -932,7 +938,7 @@ class BaseMicroscopeApp(BaseApp):
         hw.color = auto_color(hw)
 
         if hw.name in self.hardware.keys():
-            raise ValueError(
+            raise ComponentAlreadyExistsError(
                 f"Hardware '{hw.name}' already exists. Remove it first with app.remove_hardware('{hw.name}')"
             )
 
@@ -983,8 +989,9 @@ class BaseMicroscopeApp(BaseApp):
         """Loads a Measurement object into the app.
 
         If *measure* is a class, rather an instance, create an instance
-        and add it to self.measurements
+        and add it to self.measurements.
 
+        Raises ComponentAlreadyExistsError if its name is already registered.
         """
         # If *measure* is a class, rather an instance, create an instance
         if inspect.isclass(measure):
@@ -993,7 +1000,7 @@ class BaseMicroscopeApp(BaseApp):
         measure.color = auto_color(measure)
 
         if measure.name in self.measurements.keys():
-            raise ValueError(
+            raise ComponentAlreadyExistsError(
                 f"Measurement '{measure.name}' already exists. Remove it first with app.remove_measurement('{measure.name}')"
             )
 
