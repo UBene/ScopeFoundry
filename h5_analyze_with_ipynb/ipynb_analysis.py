@@ -2,13 +2,11 @@ import json
 from pathlib import Path
 from typing import List, Dict, Tuple, Union
 
-from ScopeFoundry.generate_loaders_py import (
+from .generate_loaders_py import (
     generate_loaders_py,
     get_measurement_name,
-    get_dset_names,
 )
-from .helper_funcs import open_file
-
+from ..helper_funcs import open_file
 
 IPYNB_DEMO_FNAME = "overview.ipynb"
 
@@ -268,8 +266,6 @@ def analyze_with_ipynb(
     option="last",
 ) -> None:
     loaders_fname, dset_names = generate_loaders_py(folder)
-    if not snippets and not descriptive_snippets:
-        snippets, descriptive_snippets = load_snippets(folder)
     ipynb_path = update_ipynb(
         folder,
         snippets=snippets,
@@ -285,7 +281,3 @@ def analyze_with_ipynb(
 
     if ipynb_path.exists():
         open_file(ipynb_path)
-
-
-if __name__ == "__main__":
-    analyze_with_ipynb(".")

@@ -6,7 +6,6 @@ import subprocess
 import sys
 import time
 import warnings
-from shutil import copyfile
 
 from collections import OrderedDict
 from functools import lru_cache, partial
@@ -19,7 +18,6 @@ from ScopeFoundry import h5_io, ini_io
 from ScopeFoundry.base_app.auto_color import auto_color
 from ScopeFoundry.dynamical_widgets import new_tree_widget, new_widget
 from ScopeFoundry.dynamical_widgets.tree_widget import SearchField
-from ScopeFoundry.h5_analyze_with_ipynb import generate_loaders_py, update_ipynb
 from ScopeFoundry.helper_funcs import (
     OrderedAttrDict,
     confirm_on_close,
@@ -29,7 +27,6 @@ from ScopeFoundry.helper_funcs import (
     ignore_on_close,
     itemize_launchers,
     load_qt_ui_file,
-    open_file,
     sibling_path,
 )
 from ScopeFoundry.helper_funcs import init_docs_path
@@ -79,12 +76,13 @@ class BaseMicroscopeApp(BaseApp):
     mdi = True
     """Multiple Document Interface flag. Tells the app whether to include an MDI widget in the app."""
     colorize_components = False
+    enable_ipynb_analysis = True
+    """Add the notebook analysis measurement after setup when enabled."""
 
     def __init__(self, argv: List[str] = [], **kwargs: Any) -> None:
         super().__init__(argv, **kwargs)
 
         self.settings_icon_path = self.icons_path / "settings_logo.png"
-        self.jupyter_logo_path = self.icons_path / "jupyter_logo.png"
 
         self.implementation_path = get_child_path(self)
         self.docs_path = self.implementation_path / "docs"
@@ -105,18 +103,27 @@ class BaseMicroscopeApp(BaseApp):
 
         self.setup()
 
+        ipynb_analysis = None
+        if self.enable_ipynb_analysis:
+            from ScopeFoundry.h5_analyze_with_ipynb.IpynbAnalysisMeasurement import (
+                IpynbAnalysisMeasurement,
+            )
+
+            ipynb_analysis = IpynbAnalysisMeasurement(self)
+            self.add_measurement(ipynb_analysis)
         self._setup_ui_base()
         self._setup_ui_buttons()
         self._setup_ui_tree_column()
         if self.mdi:
             self._setup_ui_mdi_area()
         self._setup_ui_menu_bar()
+        if ipynb_analysis is not None:
+            ipynb_analysis.install_app_controls(self._app_widget_buttons_layout)
         self.setup_ui()  # child may overrite
         self._register_operation_shortcuts()
         self._post_setup_ui_quickaccess()
         self._setup_ui_logo()
         self._add_docs_to_help_menu()
-        self._init_py_analysis_directory()
         self.profile_manager.initialize_startup_profile()
 
         # self.snippets = {}
@@ -265,16 +272,6 @@ class BaseMicroscopeApp(BaseApp):
         # self.settings.New('log_dir', dtype='file', is_dir=True, initial=initial_log_dir)
 
         self.setup_dark_mode_option(dark_mode=kwargs.get("dark_mode", None))
-        self.add_operation(
-            "analyze with ipynb",
-            self.on_analyze_with_ipynb,
-            "generates h5_data_loaders.py, overview.ipynb, and tries to launch overview.ipynb (vscode with jupyter extension recommended)",
-            self.jupyter_logo_path,
-            keyboard_shortcut="Ctrl+I",
-        )
-        self.settings.New(
-            "ipynb_option", str, initial="last", choices=["all", "last", "remaining"]
-        )
         self.settings.New(
             "file_loading_write_protected",
             bool,
@@ -404,8 +401,6 @@ class BaseMicroscopeApp(BaseApp):
             QtWidgets.QSizePolicy.Policy.Minimum,
             QtWidgets.QSizePolicy.Policy.Maximum,
         )
-        ipynb_btn = self.operations.new_button("analyze with ipynb")
-        ipynb_btn.setText(" analyze")
         settings_btn = QtWidgets.QPushButton(" settings")
         settings_btn.clicked.connect(self.show_app_settings)
         settings_btn.setIcon(QtGui.QIcon(str(self.settings_icon_path)))
@@ -414,7 +409,6 @@ class BaseMicroscopeApp(BaseApp):
         relaod_btn.setFixedWidth(20)
         app_widget_btns_layout = QtWidgets.QHBoxLayout()
         app_widget_btns_layout.addWidget(relaod_btn)
-        app_widget_btns_layout.addWidget(ipynb_btn)
         app_widget_btns_layout.addWidget(settings_btn)
         app_widget.layout().addLayout(app_widget_btns_layout)
         app_widget.setObjectName("app_settings")
@@ -477,13 +471,6 @@ class BaseMicroscopeApp(BaseApp):
 
         self.ui.action_show_settings.triggered.connect(self.show_app_settings)
         self.ui.action_show_settings.setIcon(QtGui.QIcon(str(self.settings_icon_path)))
-        self.ui.action_analyze_with_ipynb.triggered.connect(
-            partial(self.on_analyze_with_ipynb, folder=None)
-        )
-        self.ui.action_analyze_with_ipynb.setIcon(
-            QtGui.QIcon(str(self.jupyter_logo_path))
-        )
-
         self.ui.action_docs.triggered.connect(
             partial(self.launch_browser, url="https://www.scopefoundry.org/docs")
         )
@@ -872,51 +859,6 @@ class BaseMicroscopeApp(BaseApp):
                 hw.settings.disconnect_all_from_hardware()
             except Exception as err:
                 self.log.error(f"tried to disconnect {hw.name}: {err}")
-
-    def on_analyze_with_ipynb(self, folder: str = None) -> Path:
-        if folder is None:
-            folder = self.settings["save_dir"]
-
-        loaders_fname, dset_names = generate_loaders_py(folder)
-
-        ipynb_path = update_ipynb(
-            folder,
-            snippets=self.get_snippets(),
-            descriptive_snippets=(),
-        )
-
-        print("")
-        print("generated", loaders_fname, f"with {len(dset_names)} loader(s)")
-        print("")
-        print("check", ipynb_path)
-        print("")
-        if ipynb_path.exists():
-            open_file(ipynb_path)
-
-        folder = Path(folder)
-        # t0 = time.perf_counter()
-        for m in list(self.measurements.values()) + [self]:
-            print(m.name)
-            for source in m.get_py_analysis_scripts():
-                target_path = folder / source.name
-                if not target_path.exists():
-                    copyfile(source, target_path)
-        # t1 = time.perf_counter()
-        # print(f"copied analysis scripts in {t1-t0:.2f} seconds")
-        return ipynb_path
-
-    def get_snippets(self) -> Dict[str, str]:
-        snippets = {}
-        for name, measure in self.measurements.items():
-            try:
-                s = measure.get_py_snippet()
-                if isinstance(s, str):
-                    snippets[name] = s
-                else:
-                    snippets[name] = f"{name}.get_py_snippet returned: {repr(s)}"
-            except Exception as err:
-                self.log.error(f"Error getting snippet for {name}: {err}")
-        return snippets
 
     def read_from_hardwares(self):
         for hw in self.hardware.values():
@@ -1667,18 +1609,3 @@ class BaseMicroscopeApp(BaseApp):
             cmenu.addSeparator()
             for name, func in pairs:
                 cmenu.addAction(name, func)
-
-    def _init_py_analysis_directory(self) -> Path:
-        self.py_analysis_scripts_path = self.implementation_path / "py_analysis_scripts"
-        if not self.py_analysis_scripts_path.exists():
-            self.py_analysis_scripts_path.mkdir()
-            with open(
-                self.py_analysis_scripts_path / "__place_py_files_here.md", "w"
-            ) as f:
-                f.write(
-                    "Place .py files here that get copied to your data folder (never overrides, delete at data folder to update).\nIn particular useful to reference with snippets that gets returned with .get_py_snippets() method of the Measurement properly implemented."
-                )
-        return self.py_analysis_scripts_path
-
-    def get_py_analysis_scripts(self):
-        return self.py_analysis_scripts_path.glob("*.py")

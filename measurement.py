@@ -113,6 +113,9 @@ class Measurement:
             description="Run a profile on the run to find performance problems",
         )
 
+        # UI signals are emitted before updated_value, so the flag is set before start_stop
+        self._user_started = False
+        self.activation.add_listener_ui(self._on_user_toggled_activation, argtype=bool)
         self.activation.updated_value[bool].connect(self.start_stop)
 
         self.add_operation("start", self.start)
@@ -184,6 +187,7 @@ class Measurement:
         connects a signal/slot that calls post run when thread is finished
         """
         self.interrupt_measurement_called = False
+        self.dataset_metadata = None
         self.run_state.update_value("run_starting")
 
         msg = f"measurement {self.name} start called from thread: {repr(threading.get_ident())}"
@@ -247,6 +251,23 @@ class Measurement:
         finally:
             self.activation.update_value(False)
             self.run_state.update_value(self.end_state)
+            if self._user_started and self.end_state == "stop_success":
+                self._copy_dataset_name_to_clipboard()
+            self._user_started = False
+
+    def _on_user_toggled_activation(self, start: bool):
+        if start:
+            self._user_started = True
+
+    def _copy_dataset_name_to_clipboard(self):
+        metadata = getattr(self, "dataset_metadata", None)
+        if metadata is None:
+            return
+        try:
+            QtWidgets.QApplication.clipboard().setText(metadata.h5_file_path.name)
+        except Exception as err:
+            self.log.warning(f"could not copy dataset name to clipboard: {err}")
+        
 
     def post_run(self):
         """Override this method to enable main-thread finalization after to measurement thread completes"""

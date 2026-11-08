@@ -34,6 +34,7 @@ setup(
         "ScopeFoundry.examples.measurements.example_3d_slowscan_measure_docs",
         "ScopeFoundry.graphics",
         "ScopeFoundry.graphics.zoomable_map",
+        "ScopeFoundry.h5_analyze_with_ipynb",
         "ScopeFoundry.logged_quantity",
         "ScopeFoundry.scanning",
         "ScopeFoundry.sequencer",
