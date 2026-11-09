@@ -199,10 +199,13 @@ class ComponentPicker(QtWidgets.QDialog):
         self.resize(750, 450)
         layout = QtWidgets.QVBoxLayout(self)
         self.tabs = QtWidgets.QTabWidget()
+        self.builtin_page = QtWidgets.QWidget()
+        builtin_layout = QtWidgets.QVBoxLayout(self.builtin_page)
         self.builtin_list = ComponentTable(editable_names=True)
         self.builtin_list.itemDoubleClicked.connect(self.on_add_double_clicked)
+        builtin_layout.addWidget(self.builtin_list)
         logo = QtGui.QIcon(str(manager.app.icons_path / "scopefoundry_logo2B_1024.png"))
-        self.tabs.addTab(self.builtin_list, logo, "Add ScopeFoundry built-in")
+        self.tabs.addTab(self.builtin_page, logo, "Add ScopeFoundry built-in")
 
         self.folder_page = QtWidgets.QWidget()
         folder_layout = QtWidgets.QVBoxLayout(self.folder_page)
@@ -226,16 +229,33 @@ class ComponentPicker(QtWidgets.QDialog):
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText("Filter name, class, module, or component type")
         self.search.textChanged.connect(self.filter_items)
-        hint = QtWidgets.QLabel(
+        self.add_hint = QtWidgets.QLabel(
             "Names already in use are incremented. Double-click a name to edit it."
         )
         layout.addWidget(self.tabs)
-        layout.addWidget(hint)
-        layout.addWidget(self.search)
+        layout.addWidget(self.add_hint)
         buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Close)
         self.add_button = buttons.addButton(
             "Add selected", QtWidgets.QDialogButtonBox.ButtonRole.ActionRole
         )
+        self.initially_hidden_checkbox = QtWidgets.QCheckBox("Hidden on startup (faster startup)")
+        self.initially_hidden_checkbox.setChecked(True)
+        self.initially_hidden_checkbox.setToolTip(
+            "On app startup, defer loading the measurement UI to save time. "
+            "Measurements added now are shown."
+        )
+        self.hardware_combo = QtWidgets.QComboBox()
+        self.hardware_combo.setToolTip(
+            "On app startup, follow this hardware's connection; overrides initially hidden."
+        )
+        self.hardware_combo.currentIndexChanged.connect(self.update_measurement_options)
+        options = QtWidgets.QHBoxLayout()
+        options.addWidget(self.initially_hidden_checkbox)
+        self.hardware_label = QtWidgets.QLabel("Unhide on connection:")
+        options.addWidget(self.hardware_label)
+        options.addWidget(self.hardware_combo)
+        options.addWidget(buttons)
+        self.measurement_options = (self.initially_hidden_checkbox, self.hardware_combo)
         self.add_button.clicked.connect(self.add_selected)
         self.tabs.currentChanged.connect(self.on_tab_changed)
         self.list.itemSelectionChanged.connect(self.update_add_button)
@@ -243,7 +263,7 @@ class ComponentPicker(QtWidgets.QDialog):
         self.list.itemChanged.connect(self.filter_items)
         self.builtin_list.itemChanged.connect(self.filter_items)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        layout.addLayout(options)
         self.tabs.setCurrentWidget(self.folder_page)
         self.refresh_builtins()
         self.refresh()
@@ -254,12 +274,46 @@ class ComponentPicker(QtWidgets.QDialog):
             self.add_selected()
 
     def on_tab_changed(self, _index):
-        if self.tabs.currentWidget() is self.remove_page:
+        page = self.tabs.currentWidget()
+        adding = page is not self.remove_page
+        for widget in (self.add_hint, self.add_button, self.initially_hidden_checkbox,
+                       self.hardware_label, self.hardware_combo):
+            widget.setVisible(adding)
+        if page is self.remove_page:
+            target = self.remove_page.list
             self.remove_page.reload()
         else:
+            target = self.list if page is self.folder_page else self.builtin_list
             self.suggest_available_names()
+        page.layout().insertWidget(page.layout().indexOf(target), self.search)
+        self.search.show()
+        self.refresh_hardware_choices()
         self.filter_items()
         self.update_add_button()
+
+    def refresh_hardware_choices(self):
+        selected = self.hardware_combo.currentData()
+        blocker = QtCore.QSignalBlocker(self.hardware_combo)
+        self.hardware_combo.clear()
+        self.hardware_combo.addItem("None", None)
+        for name in self.manager.app.hardware.keys():
+            self.hardware_combo.addItem(name, name)
+        index = self.hardware_combo.findData(selected)
+        if index >= 0:
+            self.hardware_combo.setCurrentIndex(index)
+        del blocker
+        self.update_measurement_options()
+
+    def update_measurement_options(self, *_args):
+        widget = self.tabs.currentWidget()
+        selected_list = self.list if widget is self.folder_page else self.builtin_list
+        item = selected_list.currentItem() if widget is not self.remove_page else None
+        source = item.data(0, QtCore.Qt.ItemDataRole.UserRole) if item else None
+        measurement = isinstance(source, (ComponentSource, BuiltinComponentSource)) and source.kind == "measurement" and not item.isHidden()
+        self.hardware_combo.setEnabled(measurement)
+        self.initially_hidden_checkbox.setEnabled(
+            measurement and self.hardware_combo.currentData() is None
+        )
 
     def update_add_button(self):
         widget = self.tabs.currentWidget()
@@ -271,6 +325,7 @@ class ComponentPicker(QtWidgets.QDialog):
             and isinstance(item.data(0, QtCore.Qt.ItemDataRole.UserRole),
                            (ComponentSource, BuiltinComponentSource))
         )
+        self.update_measurement_options()
 
     def refresh_builtins(self):
         self.builtin_list.clear()
@@ -360,13 +415,22 @@ class ComponentPicker(QtWidgets.QDialog):
             QtWidgets.QMessageBox.information(self, "Select a component", "Select a component to add.")
             return
         source = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        measurement_options = None
+        if source.kind == "measurement":
+            hardware_name = self.hardware_combo.currentData()
+            measurement_options = {
+                "initially_hidden": self.initially_hidden_checkbox.isChecked(),
+                "unhide_on_connection": hardware_name,
+            }
         arguments = {"args": [], "kwargs": {}}
         name = item.text(0).strip()
         if name != item.data(0, QtCore.Qt.ItemDataRole.UserRole + 1) and name:
             arguments["kwargs"]["name"] = name
         while True:
             try:
-                component = self.manager.add(source, arguments=arguments)
+                component = self.manager.add(
+                    source, arguments=arguments, measurement_options=measurement_options
+                )
                 break
             except ComponentPersistenceError as error:
                 self.manager.app.log.exception("Could not save component")
@@ -389,6 +453,7 @@ class ComponentPicker(QtWidgets.QDialog):
                     return
                 arguments = dialog.arguments
         self.suggest_available_names()
+        self.refresh_hardware_choices()
         self.filter_items()
         self.manager.app.show_status_bar_msg(f"Added {source.kind} {component.name}", 5000)
 
@@ -407,6 +472,11 @@ class SavedComponentsPanel(QtWidgets.QWidget):
             "Renaming a running component recreates it and resets its state."
         ))
         self.list = ComponentTable(editable_names=True)
+        self.list.setColumnCount(7)
+        self.list.setHeaderLabels([
+            "Name", "Module", "Kind", "Class", "Path / details",
+            "Initially hidden", "Unhide on connection",
+        ])
         self.list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
         self.list.itemChanged.connect(self.rename_item)
         layout.addWidget(self.list)
@@ -438,8 +508,50 @@ class SavedComponentsPanel(QtWidgets.QWidget):
             item = self.list.add_row(values, entry, editable=isinstance(entry, dict))
             for column in range(5):
                 item.setToolTip(column, json.dumps(entry, ensure_ascii=False, indent=2))
+            if isinstance(entry, dict) and entry.get("kind") == "measurement":
+                options = entry.get("measurement_options", {})
+                if not isinstance(options, dict):
+                    continue
+                checkbox = QtWidgets.QCheckBox()
+                checkbox.setToolTip(
+                    "Applies at startup unless a hardware connection is selected."
+                )
+                checkbox.setChecked(options.get("initially_hidden") is True)
+                self.list.setItemWidget(item, 5, checkbox)
+                combo = QtWidgets.QComboBox()
+                combo.setToolTip("Startup setting; changes take effect after restarting the app.")
+                combo.addItem("None", None)
+                hardware_name = options.get("unhide_on_connection")
+                for name in self.manager.app.hardware.keys():
+                    combo.addItem(name, name)
+                if hardware_name is not None and combo.findData(hardware_name) < 0:
+                    combo.addItem(f"{hardware_name} (unavailable)", hardware_name)
+                combo.setCurrentIndex(max(0, combo.findData(hardware_name)))
+                self.list.setItemWidget(item, 6, combo)
+                checkbox.setEnabled(combo.currentData() is None)
+                checkbox.toggled.connect(
+                    lambda _checked, row=item, cb=checkbox, hw=combo:
+                        self.change_measurement_options(row, cb, hw)
+                )
+                combo.currentIndexChanged.connect(
+                    lambda _index, row=item, cb=checkbox, hw=combo:
+                        self.change_measurement_options(row, cb, hw)
+                )
         del blocker
         self.entries_changed.emit()
+
+    def change_measurement_options(self, item, checkbox, combo):
+        entry = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        options = {
+            "initially_hidden": checkbox.isChecked(),
+            "unhide_on_connection": combo.currentData(),
+        }
+        try:
+            self.manager.update_measurement_options(self.original_entries, entry, options)
+        except Exception as error:
+            self.manager.app.log.exception("Could not update measurement options")
+            QtWidgets.QMessageBox.warning(self, "Could not update measurement options", str(error))
+        self.reload()
 
     def rename_item(self, item, column):
         if column != 0:
@@ -516,7 +628,13 @@ class DynamicComponents:
 
     def __init__(self, app):
         self.app = app
-        self.root = app.implementation_path
+        implementation_path = app.implementation_path
+        self.root = next(
+            (directory / "ScopeFoundryHW"
+             for directory in (implementation_path, *implementation_path.parents)
+             if (directory / "ScopeFoundryHW").is_dir()),
+            implementation_path,
+        )
         self.added = {}
         self.unresolved = []
         self.order = []
@@ -546,6 +664,32 @@ class DynamicComponents:
                 if name in collection:
                     return collection[name].name
         return None
+
+    def update_measurement_options(self, original, entry, options):
+        config = self._read_config()
+        entries = self._saved_entries(config)
+        if entries != original:
+            raise ValueError("Saved components changed elsewhere. Reopen the Edit tab and try again.")
+        if not isinstance(entry, dict) or entry.get("kind") != "measurement":
+            raise ValueError("Measurement options are only valid for measurements.")
+        hardware_name = options["unhide_on_connection"]
+        previous = entry.get("measurement_options", {})
+        old_hardware_name = previous.get("unhide_on_connection")
+        name = self.running_name(entry)
+        if hardware_name != old_hardware_name and hardware_name is not None:
+            if hardware_name not in self.app.hardware:
+                raise ValueError(f"Hardware '{hardware_name}' is not currently available.")
+        updated = dict(entry, measurement_options=dict(options))
+        revised = list(entries)
+        revised[revised.index(entry)] = updated
+        config[self.config_key] = revised
+        self._save_config(config)
+        if entry in self.order:
+            self.order[self.order.index(entry)] = updated
+        if entry in self.unresolved:
+            self.unresolved[self.unresolved.index(entry)] = updated
+        if name is not None:
+            self.added[("measurement", name)] = updated
 
     def rename_saved(self, original, entry, name):
         if not name or name != name.strip():
@@ -581,6 +725,16 @@ class DynamicComponents:
         bind_component_arguments(component_class, self.app, new_arguments)
         updated = dict(entry, arguments=new_arguments)
         old_name = self.running_name(entry)
+        if source.kind == "hardware":
+            default_name = source.inferred_name if isinstance(source, ComponentSource) else source.name
+            saved_name = old_name or arguments.get("kwargs", {}).get("name") or default_name
+            if saved_name and any(
+                isinstance(item, dict)
+                and isinstance(item.get("measurement_options"), dict)
+                and item["measurement_options"].get("unhide_on_connection") == saved_name
+                for item in entries
+            ):
+                raise ValueError(f"Remove measurements linked to hardware '{saved_name}' before renaming it.")
         collection = self.app.hardware if source.kind == "hardware" else self.app.measurements
         if name in collection and name != old_name:
             raise ComponentAlreadyExistsError(f"{source.kind.title()} '{name}' already exists.")
@@ -601,7 +755,10 @@ class DynamicComponents:
         if source.kind == "measurement" and component.is_measuring():
             raise ValueError(f"Stop measurement '{old_name}' before renaming it.")
 
-        replacement = self.add(source, new_arguments, persist=False)
+        replacement = self.add(
+            source, new_arguments, persist=False,
+            measurement_options=entry.get("measurement_options"),
+        )
         replacement_key = (source.kind, replacement.name)
         try:
             if replacement.name != name:
@@ -686,16 +843,33 @@ class DynamicComponents:
             source = ComponentSource(source.root, source.module, str(path), source.class_name, source.kind)
         return source
 
-    def add(self, source, arguments=None, persist=True):
+    def add(self, source, arguments=None, persist=True, measurement_options=None, *, restoring=False):
         component_class = load_component_class(source)
         arguments = arguments if arguments is not None else {"args": [], "kwargs": {}}
         args, kwargs = bind_component_arguments(component_class, self.app, arguments)
+        if measurement_options is not None:
+            if source.kind != "measurement" or not isinstance(measurement_options, dict):
+                raise ValueError("Measurement options are only valid for measurements.")
+            if set(measurement_options) - {"initially_hidden", "unhide_on_connection"}:
+                raise ValueError("Unknown measurement options.")
+            initially_hidden = measurement_options.get("initially_hidden")
+            hardware_name = measurement_options.get("unhide_on_connection")
+            if initially_hidden is not None and not isinstance(initially_hidden, bool):
+                raise ValueError("initially_hidden must be a boolean or null.")
+            if hardware_name is not None and (
+                not isinstance(hardware_name, str) or not hardware_name
+            ):
+                raise ValueError("unhide_on_connection must be a hardware name or null.")
+            if hardware_name is not None and hardware_name not in self.app.hardware:
+                raise ValueError(f"Hardware '{hardware_name}' is not currently available.")
         try:
             config = self._read_config() if persist else None
             saved = self._saved_entries(config) if persist else None
         except (OSError, ValueError) as error:
             raise ComponentPersistenceError(f"Could not read the component configuration: {error}") from error
         entry = self._entry_for_source(source, arguments)
+        if measurement_options is not None:
+            entry["measurement_options"] = dict(measurement_options)
         if persist and entry in saved:
             raise ComponentAlreadyExistsError(f"{source.class_name} is already in the saved component list.")
         collection = self.app.hardware if source.kind == "hardware" else self.app.measurements
@@ -710,7 +884,12 @@ class DynamicComponents:
             if source.kind == "hardware":
                 self.app.add_hardware(instance)
             else:
-                self.app.add_measurement(instance)
+                options = {"initially_hidden": False}
+                if restoring and measurement_options is not None:
+                    options["initially_hidden"] = initially_hidden
+                    if hardware_name is not None:
+                        options["unhide_on_connection"] = self.app.hardware[hardware_name]
+                self.app.add_measurement(instance, **options)
             instance.operations.set_shortcut_parent(self.app.ui)
             if persist:
                 try:
@@ -757,6 +936,17 @@ class DynamicComponents:
                             raise ValueError(f"Stop measurement '{key[1]}' before removing it.")
                         running[id(entry)] = key
                     break
+        for entry in selected:
+            key = running.get(id(entry))
+            if key and key[0] == "hardware" and any(
+                isinstance(item, dict)
+                and isinstance(item.get("measurement_options"), dict)
+                and item["measurement_options"].get("unhide_on_connection") == key[1]
+                for item in remaining
+            ):
+                raise ValueError(
+                    f"Remove measurements linked to hardware '{key[1]}' before removing it."
+                )
         for entry in selected:
             config = self._read_config()
             if self._saved_entries(config) != entries:
@@ -841,11 +1031,20 @@ class DynamicComponents:
                     component_class, "name", component_class.__name__
                 )
                 if name in collection and type(collection[name]) is component_class:
+                    if "measurement_options" in entry:
+                        raise ValueError(
+                            f"Measurement '{name}' is already supplied by setup; "
+                            "its saved measurement options cannot be applied."
+                        )
                     self.app.log.info("Saved component %s is already supplied by setup", name)
                     self.added[(source.kind, name)] = entry
                     self.order.append(entry)
                     continue
-                self.add(source, arguments=arguments, persist=False)
+                self.add(
+                    source, arguments=arguments, persist=False,
+                    measurement_options=entry.get("measurement_options"),
+                    restoring=True,
+                )
                 generated = self.order[-1]
                 self.order[-1] = entry
                 for key, current in list(self.added.items()):

@@ -4,6 +4,7 @@ Created on Tue Apr  1 09:25:48 2014
 """
 
 import pathlib
+from functools import partial
 import sys
 import threading
 import time
@@ -111,6 +112,13 @@ class Measurement:
             dtype=bool,
             initial=False,
             description="Run a profile on the run to find performance problems",
+        )
+
+        self.settings.New(
+            "hidden",
+            dtype=bool,
+            initial=False,
+            description="Hidden measurements do not load their UI and are only listed in the tree if 'show hidden' is checked.",
         )
 
         # UI signals are emitted before updated_value, so the flag is set before start_stop
@@ -540,6 +548,7 @@ class Measurement:
         """
         Shows the graphical user interface of this measurement. :attr:`ui`
         """
+        self.settings["hidden"] = False  # unhiding loads the ui
         self.app.bring_measure_ui_to_front(self)
 
     def new_control_widgets(self, title: str = None, include=None, exclude=None):
@@ -643,9 +652,14 @@ class Measurement:
 
         cmenu.addAction("Start", self.start)
         cmenu.addAction("Interrupt", self.interrupt)
-        ui = self.app.load_measure_ui(self)
-        if ui is not None:
-            cmenu.addAction("Show", self.show_ui)
+        hidden_lq = self.settings.get_lq("hidden")
+        if hidden_lq.value:
+            cmenu.addAction("Unhide", partial(hidden_lq.update_value, False))
+        else:
+            ui = self.app.load_measure_ui(self)
+            if ui is not None:
+                cmenu.addAction("Show", self.show_ui)
+            cmenu.addAction("Hide", partial(hidden_lq.update_value, True))
 
         init_docs_path(self.docs_path, self.settings)
         pairs = itemize_launchers(self.docs_path, self.app.launch_browser, False)

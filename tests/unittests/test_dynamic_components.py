@@ -23,6 +23,7 @@ from ScopeFoundry.base_app.component_picker import (
     ComponentArgumentsDialog,
     ComponentPersistenceError,
     ComponentPicker,
+    DynamicComponents,
     SavedComponentsEditor,
     available_component_name,
 )
@@ -128,6 +129,19 @@ class DynamicComponentsTest(unittest.TestCase):
         self.assertTrue((self.directory / "imported").exists())
         self.assertEqual(load_component_class(sources["NeedsArgument"]).__name__, "NeedsArgument")
 
+    def test_default_component_folder_uses_nearest_hardware_directory(self):
+        implementation = self.directory / "parent" / "app"
+        implementation.mkdir(parents=True)
+        app = type("App", (), {"implementation_path": implementation})()
+        with patch.object(Path, "is_dir", return_value=False):
+            self.assertEqual(DynamicComponents(app).root, implementation)
+        parent_hw = implementation.parent / "ScopeFoundryHW"
+        parent_hw.mkdir()
+        self.assertEqual(DynamicComponents(app).root, parent_hw)
+        local_hw = implementation / "ScopeFoundryHW"
+        local_hw.mkdir()
+        self.assertEqual(DynamicComponents(app).root, local_hw)
+
     def test_discovery_infers_only_literal_class_names(self):
         (self.project / "names.py").write_text(
             "from ScopeFoundry import HardwareComponent\n"
@@ -186,6 +200,186 @@ class DynamicComponentsTest(unittest.TestCase):
         self.assertEqual(entry["arguments"], {"args": [], "kwargs": {"required": "chosen"}})
         restored = self.make_app()
         self.assertEqual(restored.measurements["NeedsArgument"].required, "chosen")
+
+    def test_picker_measurement_options_are_saved_and_restored(self):
+        sources = self.sources()
+        app = self.make_app()
+        device = app.dynamic_components.add(sources["Device"])
+        picker = ComponentPicker(app.dynamic_components)
+        self.addCleanup(picker.deleteLater)
+        picker.root.setText(str(self.project))
+        picker.refresh()
+        item = next(
+            picker.list.topLevelItem(i) for i in range(picker.list.topLevelItemCount())
+            if picker.list.topLevelItem(i).data(0, QtCore.Qt.ItemDataRole.UserRole)
+            == sources["Acquisition"]
+        )
+        picker.list.setCurrentItem(item)
+        self.assertTrue(picker.initially_hidden_checkbox.isEnabled())
+        picker.initially_hidden_checkbox.setChecked(True)
+        picker.hardware_combo.setCurrentIndex(
+            picker.hardware_combo.findData(device.name)
+        )
+        self.assertFalse(picker.initially_hidden_checkbox.isEnabled())
+        with patch.object(app, "add_measurement", wraps=app.add_measurement) as add:
+            picker.add_selected()
+        self.assertNotIn("unhide_on_connection", add.call_args.kwargs)
+        self.assertFalse(add.call_args.kwargs["initially_hidden"])
+        measurement = app.measurements["dynamic_measurement"]
+        self.assertFalse(measurement.settings["hidden"])
+        device.connected.updated_value[bool].emit(True)
+        self.assertFalse(measurement.settings["hidden"])
+        self.assertFalse(device.connected.val)
+        device.connected.updated_value[bool].emit(False)
+        self.assertFalse(measurement.settings["hidden"])
+        saved = json.loads(app.microscope_config_path.read_text())["dynamic_components"]
+        self.assertEqual(saved[1]["measurement_options"], {
+            "initially_hidden": True, "unhide_on_connection": device.name,
+        })
+        restored = self.make_app()
+        restored_measurement = restored.measurements["dynamic_measurement"]
+        restored_device = restored.hardware[device.name]
+        self.assertTrue(restored_measurement.settings["hidden"])
+        restored_device.connected.updated_value[bool].emit(True)
+        self.assertFalse(restored_measurement.settings["hidden"])
+        restored.remove_measurement(restored_measurement.name)
+        restored_device.connected.updated_value[bool].emit(False)
+
+    def test_picker_initially_hidden_without_hardware(self):
+        source = self.sources()["Acquisition"]
+        app = self.make_app()
+        picker = ComponentPicker(app.dynamic_components)
+        self.addCleanup(picker.deleteLater)
+        picker.root.setText(str(self.project))
+        picker.refresh()
+        item = next(
+            picker.list.topLevelItem(i) for i in range(picker.list.topLevelItemCount())
+            if picker.list.topLevelItem(i).data(0, QtCore.Qt.ItemDataRole.UserRole) == source
+        )
+        picker.list.setCurrentItem(item)
+        self.assertTrue(picker.initially_hidden_checkbox.isChecked())
+        picker.add_selected()
+        self.assertFalse(app.measurements["dynamic_measurement"].settings["hidden"])
+        self.assertIn("dynamic_measurement", app._loaded_measure_uis)
+        entry = json.loads(app.microscope_config_path.read_text())["dynamic_components"][0]
+        self.assertTrue(entry["measurement_options"]["initially_hidden"])
+        restored = self.make_app()
+        self.assertTrue(restored.measurements["dynamic_measurement"].settings["hidden"])
+
+    def test_picker_search_is_above_each_list(self):
+        app = self.make_app()
+        picker = ComponentPicker(app.dynamic_components)
+        self.addCleanup(picker.deleteLater)
+        picker.search.setText("device")
+        for page, table in (
+            (picker.folder_page, picker.list),
+            (picker.builtin_page, picker.builtin_list),
+            (picker.remove_page, picker.remove_page.list),
+        ):
+            picker.tabs.setCurrentWidget(page)
+            self.assertEqual(page.layout().indexOf(picker.search) + 1,
+                             page.layout().indexOf(table))
+            self.assertEqual(picker.search.text(), "device")
+
+    def test_edit_tab_options_apply_on_restart(self):
+        sources = self.sources()
+        app = self.make_app()
+        device = app.dynamic_components.add(sources["Device"])
+        measurement = app.dynamic_components.add(
+            sources["Acquisition"],
+            measurement_options={"initially_hidden": False, "unhide_on_connection": None},
+        )
+        picker = ComponentPicker(app.dynamic_components)
+        self.addCleanup(picker.deleteLater)
+        picker.show()
+        picker.tabs.setCurrentWidget(picker.remove_page)
+        self.assertTrue(picker.add_button.isHidden())
+        self.assertTrue(picker.initially_hidden_checkbox.isHidden())
+        self.assertTrue(picker.hardware_combo.isHidden())
+        self.assertFalse(picker.remove_page.list.isHidden())
+        item = picker.remove_page.list.topLevelItem(1)
+        checkbox = picker.remove_page.list.itemWidget(item, 5)
+        checkbox.setChecked(True)
+        entry = json.loads(app.microscope_config_path.read_text())["dynamic_components"][1]
+        self.assertTrue(entry["measurement_options"]["initially_hidden"])
+        self.assertFalse(measurement.settings["hidden"])
+        item = picker.remove_page.list.topLevelItem(1)
+        combo = picker.remove_page.list.itemWidget(item, 6)
+        combo.setCurrentIndex(combo.findData(device.name))
+        entry = json.loads(app.microscope_config_path.read_text())["dynamic_components"][1]
+        self.assertEqual(entry["measurement_options"]["unhide_on_connection"], device.name)
+        self.assertFalse(measurement.settings["hidden"])
+        device.connected.updated_value[bool].emit(True)
+        self.assertFalse(measurement.settings["hidden"])
+        restored_with_link = self.make_app()
+        linked_measurement = restored_with_link.measurements[measurement.name]
+        linked_device = restored_with_link.hardware[device.name]
+        self.assertTrue(linked_measurement.settings["hidden"])
+        linked_device.connected.updated_value[bool].emit(True)
+        self.assertFalse(linked_measurement.settings["hidden"])
+        item = picker.remove_page.list.topLevelItem(1)
+        combo = picker.remove_page.list.itemWidget(item, 6)
+        combo.setCurrentIndex(0)
+        linked_device.connected.updated_value[bool].emit(False)
+        self.assertTrue(linked_measurement.settings["hidden"])
+        device.connected.updated_value[bool].emit(False)
+        self.assertFalse(measurement.settings["hidden"])
+        restored = self.make_app()
+        self.assertTrue(restored.measurements[measurement.name].settings["hidden"])
+        picker.tabs.setCurrentWidget(picker.folder_page)
+        self.assertFalse(picker.add_button.isHidden())
+
+    def test_edit_options_save_failure_reverts_widgets(self):
+        app = self.make_app()
+        app.dynamic_components.add(
+            self.sources()["Acquisition"],
+            measurement_options={"initially_hidden": False, "unhide_on_connection": None},
+        )
+        picker = ComponentPicker(app.dynamic_components)
+        self.addCleanup(picker.deleteLater)
+        picker.tabs.setCurrentWidget(picker.remove_page)
+        item = picker.remove_page.list.topLevelItem(0)
+        checkbox = picker.remove_page.list.itemWidget(item, 5)
+        with patch.object(app.dynamic_components, "_save_config", side_effect=OSError("disk full")):
+            checkbox.setChecked(True)
+        item = picker.remove_page.list.topLevelItem(0)
+        self.assertFalse(picker.remove_page.list.itemWidget(item, 5).isChecked())
+        self.assertFalse(json.loads(app.microscope_config_path.read_text())[
+            "dynamic_components"][0]["measurement_options"]["initially_hidden"])
+
+    def test_missing_linked_hardware_is_reported_on_restore(self):
+        source = self.sources()["Acquisition"]
+        entry = source.as_dict()
+        entry["measurement_options"] = {
+            "initially_hidden": False, "unhide_on_connection": "missing_device",
+        }
+        config_path = self.directory / "dynamic-test.scopefoundry"
+        config_path.write_text(json.dumps({"dynamic_components": [entry]}))
+        app = self.make_app()
+        self.assertNotIn("dynamic_measurement", app.measurements)
+        self.assertEqual(app.dynamic_components.unresolved, [entry])
+        QtWidgets.QMessageBox.warning.assert_called()
+
+    def test_linked_measurement_rename_and_hardware_removal(self):
+        sources = self.sources()
+        app = self.make_app()
+        app.dynamic_components.add(sources["Device"])
+        app.dynamic_components.add(
+            sources["Acquisition"],
+            measurement_options={
+                "initially_hidden": False, "unhide_on_connection": "dynamic_device",
+            },
+        )
+        entries = json.loads(app.microscope_config_path.read_text())["dynamic_components"]
+        with self.assertRaisesRegex(ValueError, "linked"):
+            app.dynamic_components.remove_saved(entries, [entries[0]])
+        with self.assertRaisesRegex(ValueError, "linked"):
+            app.dynamic_components.rename_saved(entries, entries[0], "renamed_device")
+        app.dynamic_components.rename_saved(entries, entries[1], "renamed_measurement")
+        restored = self.make_app()
+        self.assertTrue(restored.measurements["renamed_measurement"].settings["hidden"])
+        restored.hardware["dynamic_device"].connected.updated_value[bool].emit(True)
+        self.assertFalse(restored.measurements["renamed_measurement"].settings["hidden"])
 
     def test_existing_saved_component_can_be_added_again_with_a_new_name(self):
         source = self.sources()["Device"]
@@ -331,7 +525,7 @@ class DynamicComponentsTest(unittest.TestCase):
         self.addCleanup(picker.deleteLater)
         item = picker.builtin_list.topLevelItem(0)
         self.assertEqual(item.text(0), "ranged_optimization_3")
-        picker.tabs.setCurrentWidget(picker.builtin_list)
+        picker.tabs.setCurrentWidget(picker.builtin_page)
         picker.builtin_list.setCurrentItem(item)
         picker.add_selected()
         self.assertIn("ranged_optimization_3", app.measurements)
@@ -377,7 +571,7 @@ class DynamicComponentsTest(unittest.TestCase):
                    return_value=([source], [])):
             picker = ComponentPicker(app.dynamic_components)
         self.addCleanup(picker.deleteLater)
-        picker.tabs.setCurrentWidget(picker.builtin_list)
+        picker.tabs.setCurrentWidget(picker.builtin_page)
         item = picker.builtin_list.topLevelItem(0)
         item.setText(0, "chosen_builtin")
         picker.builtin_list.setCurrentItem(item)
@@ -586,7 +780,7 @@ class DynamicComponentsTest(unittest.TestCase):
         picker.remove_page.remove_selected()
         self.assertEqual(json.loads(config_path.read_text())["dynamic_components"], [entries[1]])
         self.assertTrue(saved.topLevelItem(0).isHidden())
-        picker.tabs.setCurrentWidget(picker.builtin_list)
+        picker.tabs.setCurrentWidget(picker.builtin_page)
         picker.search.setText("sequencer")
         self.assertFalse(picker.builtin_list.topLevelItem(0).isHidden())
         self.assertTrue(device.isHidden())
@@ -637,7 +831,7 @@ class DynamicComponentsTest(unittest.TestCase):
             picker = ComponentPicker(app.dynamic_components)
             self.addCleanup(picker.deleteLater)
             loader.assert_not_called()
-            picker.tabs.setCurrentWidget(picker.builtin_list)
+            picker.tabs.setCurrentWidget(picker.builtin_page)
             item = picker.builtin_list.topLevelItem(0)
             self.assertEqual([item.text(i) for i in range(5)],
                              ["sequence_name", "ScopeFoundry.sequencer.sequencer", "Measurement", "Sequencer", ""])
@@ -650,7 +844,10 @@ class DynamicComponentsTest(unittest.TestCase):
             self.assertTrue(picker.add_button.isEnabled())
             with patch.object(app.dynamic_components, "add", return_value=type("Component", (), {"name": "sequence"})()) as add:
                 picker.add_selected()
-                add.assert_called_once_with(source, arguments={"args": [], "kwargs": {}})
+                add.assert_called_once_with(
+                    source, arguments={"args": [], "kwargs": {}},
+                    measurement_options={"initially_hidden": True, "unhide_on_connection": None},
+                )
 
     def test_builtin_catalog_validation_and_errors(self):
         path = self.directory / "catalog.json"
@@ -708,19 +905,22 @@ class DynamicComponentsTest(unittest.TestCase):
         with patch("ScopeFoundry.base_app.component_picker.load_builtin_catalog", return_value=([source], [])):
             picker = ComponentPicker(app.dynamic_components)
         self.addCleanup(picker.deleteLater)
-        picker.tabs.setCurrentWidget(picker.builtin_list)
+        picker.tabs.setCurrentWidget(picker.builtin_page)
         self.assertEqual(picker.builtin_list.topLevelItem(0).text(0), "ranged_optimization")
         picker.builtin_list.setCurrentItem(picker.builtin_list.topLevelItem(0))
         picker.add_selected()
-        self.assertEqual(app.dynamic_components.order, [source.as_dict()])
+        entry = dict(source.as_dict(), measurement_options={
+            "initially_hidden": True, "unhide_on_connection": None,
+        })
+        self.assertEqual(app.dynamic_components.order, [entry])
         saved = json.loads(app.microscope_config_path.read_text())
-        self.assertEqual(saved["dynamic_components"], [source.as_dict()])
+        self.assertEqual(saved["dynamic_components"], [entry])
         picker.tabs.setCurrentWidget(picker.remove_page)
         self.assertEqual(picker.remove_page.list.topLevelItem(0).text(4), "ScopeFoundry built-in")
         with patch("ScopeFoundry.base_app.component_picker.load_builtin_catalog", side_effect=FileNotFoundError("catalog removed")):
             restored = self.make_app()
         self.assertTrue(any(type(measure).__name__ == source.class_name for measure in restored.measurements.values()))
-        self.assertEqual(restored.dynamic_components.order, [source.as_dict()])
+        self.assertEqual(restored.dynamic_components.order, [entry])
 
     def test_measurement_registration_mdi_and_non_mdi(self):
         source = self.sources()["Acquisition"]

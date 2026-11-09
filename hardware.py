@@ -72,6 +72,13 @@ class HardwareComponent:
             "debug_mode", dtype=bool, initial=debug, colors=["lightgrey", "orange"]
         )
 
+        self.settings.New(
+            "hidden",
+            dtype=bool,
+            initial=False,
+            description="Hidden hardware is only listed in the tree if 'show hidden' is checked.",
+        )
+
         # self.connect_success = False # ever used?
         self.auto_thread_lock = True
 
@@ -183,6 +190,7 @@ class HardwareComponent:
         """Hook method called when the connection to the hardware succeeds. This method is not intended to be overridden by subclasses for additional setup; use post_connect instead, use post_connect for that purpose."""
         print(self.name, "connection succeeded!")
         self.connected.update_value(True)
+        self.settings.get_lq("hidden").update_value(False)
         self.set_connection_status("✓", "green")
         self.post_connect()
 
@@ -309,6 +317,11 @@ class HardwareComponent:
         cmenu.addAction("Connect", connect)
         cmenu.addAction("Disconnect", disconnect)
         cmenu.addAction("Read from Hardware", self.read_from_hardware)
+        hidden_lq = self.settings.get_lq("hidden")
+        if hidden_lq.value:
+            cmenu.addAction("Unhide", partial(hidden_lq.update_value, False))
+        else:
+            cmenu.addAction("Hide", partial(hidden_lq.update_value, True))
 
         init_docs_path(self.docs_path, self.settings)
         pairs = itemize_launchers(self.docs_path, self.app.launch_browser)

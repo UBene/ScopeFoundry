@@ -34,11 +34,51 @@ class SFQTreeWidget(QtWidgets.QTreeWidget):
 
     _filter_text = ""
     _expanded_before_filter = None
+    show_hidden = False
+
+    def set_show_hidden(self, show: bool) -> None:
+        self.show_hidden = bool(show)
+        self.refresh_visibility()
+
+    def refresh_visibility(self) -> None:
+        self.apply_filter(self._filter_text)
+
+    @staticmethod
+    def _has_hidden_flag(header) -> bool:
+        try:
+            return bool(header.obj.settings["hidden"])
+        except (AttributeError, KeyError):
+            return False
+
+    def _is_hidden_obj(self, header) -> bool:
+        return not self.show_hidden and self._has_hidden_flag(header)
+
+    def _style_header(self, header) -> None:
+        """Faint italic text for hidden components, normal otherwise."""
+        hidden = self._has_hidden_flag(header)
+        has_color = getattr(getattr(header, "obj", None), "color", None) is not None
+        for col in range(self.columnCount()):
+            font = header.font(col)
+            font.setItalic(hidden)
+            header.setFont(col, font)
+        if has_color:
+            header.setForeground(
+                0, QtGui.QColor(185, 185, 185) if hidden else QtGui.QColor("white")
+            )
+        for j in range(header.childCount()):
+            child = header.child(j)
+            font = child.font(0)
+            font.setItalic(hidden)
+            child.setFont(0, font)
+            child.setForeground(
+                0, QtGui.QBrush(QtGui.QColor(150, 150, 150)) if hidden else QtGui.QBrush()
+            )
 
     def apply_filter(self, text: str) -> None:
         """Show only items whose paths match *text* (all whitespace separated
         terms must match; terms with * ? [ are fnmatch patterns, others are
-        case-insensitive substrings). A matching header shows all its children."""
+        case-insensitive substrings). A matching header shows all its children.
+        Components with a true "hidden" setting are skipped unless show_hidden."""
         text = text.strip()
         was_filtering = bool(self._filter_text)
         self._filter_text = text
@@ -52,8 +92,10 @@ class SFQTreeWidget(QtWidgets.QTreeWidget):
 
         for i in range(self.topLevelItemCount()):
             header = self.topLevelItem(i)
+            self._style_header(header)
+            obj_hidden = self._is_hidden_obj(header)
             if not terms:
-                header.setHidden(False)
+                header.setHidden(obj_hidden)
                 for j in range(header.childCount()):
                     header.child(j).setHidden(False)
                 if was_filtering and self._expanded_before_filter:
@@ -69,8 +111,8 @@ class SFQTreeWidget(QtWidgets.QTreeWidget):
                 visible = header_match or matches_search_terms(_item_path(child), terms)
                 child.setHidden(not visible)
                 any_child = any_child or visible
-            header.setHidden(not (header_match or any_child))
-            if header_match or any_child:
+            header.setHidden(obj_hidden or not (header_match or any_child))
+            if not obj_hidden and (header_match or any_child):
                 header.setExpanded(True)
 
         if not terms:
@@ -204,9 +246,22 @@ class SubtreeManager:
             self.exclude,
         )
         self.header_item.obj = obj
+        self._hidden_lq = None
+        if "hidden" in self.settings:
+            self._hidden_lq = self.settings.get_lq("hidden")
+            self._hidden_lq.updated_value[bool].connect(self._on_hidden_changed)
+            self._on_hidden_changed(self._hidden_lq.value)
+        else:
+            self._reapply_filter()
+
+    def _on_hidden_changed(self, hidden: bool) -> None:
+        if hasattr(self.tree_widget, "refresh_visibility"):
+            self.tree_widget.refresh_visibility()
 
     def _reapply_filter(self):
         tree = self.tree_widget
+        if hasattr(tree, "_style_header"):
+            tree._style_header(self.header_item)
         if hasattr(tree, "apply_filter") and tree._filter_text:
             tree.apply_filter(tree._filter_text)
 
@@ -242,6 +297,8 @@ class SubtreeManager:
             self.header_item.setForeground(col, QtGui.QColor(color))
 
     def cleanup(self):
+        if self._hidden_lq is not None:
+            self._hidden_lq.updated_value[bool].disconnect(self._on_hidden_changed)
         self.settings.q_object.lq_added.disconnect(self.add_lq_child_item)
         self.settings.q_object.lq_removed.disconnect(self.remove_lq_child_item)
         self.operations.q_object.added.disconnect(self.add_operation_child_item)

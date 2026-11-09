@@ -8,9 +8,9 @@ import time
 import warnings
 
 from collections import OrderedDict
-from functools import lru_cache, partial
+from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Protocol
+from typing import Any, Dict, List, Optional, Protocol
 
 from qtpy import QtCore, QtGui, QtWidgets
 
@@ -80,6 +80,7 @@ class BaseMicroscopeApp(BaseApp):
     """Add the notebook analysis measurement after setup when enabled."""
 
     def __init__(self, argv: List[str] = [], **kwargs: Any) -> None:
+
         super().__init__(argv, **kwargs)
 
         self.settings_icon_path = self.icons_path / "settings_logo.png"
@@ -162,6 +163,8 @@ class BaseMicroscopeApp(BaseApp):
 
     def add_setting_path(self, lq: LoggedQuantity) -> None:
         super().add_setting_path(lq)
+        if not hasattr(self, "profile_manager"):
+            return
         profile_action_text = "Save current value to profile..."
         remove_profile_action_text = "Remove saved value from profile..."
         if (
@@ -175,7 +178,7 @@ class BaseMicroscopeApp(BaseApp):
             lq.actions.append(
                 (
                     profile_action_text,
-                    partial(self._save_lq_value_to_profile, lq.path),
+                    partial(self.profile_manager.save_setting_to_profile, lq.path),
                 )
             )
         if (
@@ -189,23 +192,13 @@ class BaseMicroscopeApp(BaseApp):
             lq.actions.append(
                 (
                     remove_profile_action_text,
-                    partial(self._remove_lq_value_from_profile, lq.path),
+                    partial(self.profile_manager.remove_setting_from_profile, lq.path),
                 )
             )
         if not lq.ro and self._save_ui_lq_change_snapshot not in lq.ui_listeners:
             lq.add_listener_ui(
                 self._save_ui_lq_change_snapshot, argtype=(str, object, object)
             )
-
-    def _save_lq_value_to_profile(self, path: str, checked: bool = False) -> None:
-        profile_manager = getattr(self, "profile_manager", None)
-        if profile_manager is not None:
-            profile_manager.save_setting_to_profile(path)
-
-    def _remove_lq_value_from_profile(self, path: str, checked: bool = False) -> None:
-        profile_manager = getattr(self, "profile_manager", None)
-        if profile_manager is not None:
-            profile_manager.remove_setting_from_profile(path)
 
     def remove_setting_path(self, lq: LoggedQuantity) -> None:
         if self._save_ui_lq_change_snapshot in lq.ui_listeners:
@@ -344,6 +337,8 @@ class BaseMicroscopeApp(BaseApp):
             self.ui.col_splitter.setStretchFactor(1, 1)
 
         self._loaded_measure_uis = {}
+        self._measure_menu_actions = {}
+        self._pending_win_states = {}
 
         self.ui.show()
         self.ui.activateWindow()
@@ -426,6 +421,17 @@ class BaseMicroscopeApp(BaseApp):
         self.add_component_button = QtWidgets.QPushButton("Add or remove components...")
         self.add_component_button.clicked.connect(self.dynamic_components.show_picker)
         self.ui.tree_layout.addWidget(self.add_component_button)
+        self.show_hidden_checkbox = QtWidgets.QCheckBox("show hidden")
+        self.show_hidden_checkbox.setToolTip(
+            "List hardware and measurements whose 'hidden' setting is checked"
+        )
+        self.show_hidden_checkbox.toggled.connect(self.hw_tree.set_show_hidden)
+        self.show_hidden_checkbox.toggled.connect(self.mm_tree.set_show_hidden)
+        search_layout = QtWidgets.QHBoxLayout()
+        search_layout.setContentsMargins(0, 0, 0, 0)
+        search_layout.addWidget(self.tree_search_field, 1)
+        search_layout.addWidget(self.show_hidden_checkbox)
+        self.ui.tree_layout.addLayout(search_layout)
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         splitter.addWidget(self.hw_tree)
@@ -441,15 +447,36 @@ class BaseMicroscopeApp(BaseApp):
         self.console_subwin = self.add_mdi_subwin(self.console_widget, "Console")
 
         for name, measure in self.measurements.items():
+            if measure.settings["hidden"]:
+                continue
             self.log.debug(f"setting up figure for measurement {name}")
-            ui = self.load_measure_ui(measure)
-            if ui is not None:
-                subwin = self.add_mdi_subwin(ui, measure.name, measure.color)
-                measure.subwin = subwin
+            self.load_measure_ui(measure)
+
+    def _on_measure_hidden_changed(self, measure: MeasurementProtocol, hidden) -> None:
+        """Hiding only hides the window; ui and subwin stay alive."""
+        if not hasattr(self, "ui"):
+            return
+        action = self._measure_menu_actions.get(measure.name)
+        if action is not None:
+            action.setVisible(not hidden)
+        if hidden:
+            widget = (
+                measure.subwin
+                if self.mdi
+                else self._loaded_measure_uis.get(measure.name)
+            )
+            if widget is not None:
+                widget.hide()
+            return
+        ui = self.load_measure_ui(measure)
+        widget = measure.subwin if self.mdi else ui
+        if widget is not None:
+            widget.show()
 
     def _load_all_measure_uis(self) -> None:
         for measure in self.measurements.values():
-            self.load_measure_ui(measure)
+            if not measure.settings["hidden"]:
+                self.load_measure_ui(measure)
         self.ui.action_load_all_measure_uis.setVisible(False)
 
     def _setup_ui_menu_bar(self) -> None:
@@ -703,20 +730,28 @@ class BaseMicroscopeApp(BaseApp):
             ui.show()
 
     def load_measure_ui(self, measure: MeasurementProtocol) -> QtWidgets.QWidget:
-        if measure.name in self._loaded_measure_uis:
-            return self._loaded_measure_uis[measure.name]
+        """Idempotently builds the ui (and, with mdi, its subwindow) of *measure*."""
+        name = measure.name
+        if name not in self._loaded_measure_uis:
+            measure.setup_figure()
+            if not hasattr(measure, "ui"):
+                self._loaded_measure_uis[name] = None
+                for btn in measure._show_btns:
+                    btn.setVisible(False)
+            else:
+                self._loaded_measure_uis[name] = measure.ui
+                measure.ui.setWindowTitle(name)
+                self._measure_menu_actions[name] = self.ui.menuWindow.addAction(
+                    name, measure.show_ui
+                )
 
-        measure.setup_figure()
-        if not hasattr(measure, "ui"):
-            self._loaded_measure_uis[measure.name] = None
-            for btn in measure._show_btns:
-                btn.setVisible(False)
-            return None
-
-        self._loaded_measure_uis[measure.name] = measure.ui
-        measure.ui.setWindowTitle(measure.name)
-        self.ui.menuWindow.addAction(measure.name, measure.show_ui)
-        return measure.ui
+        ui = self._loaded_measure_uis[name]
+        if ui is not None and self.mdi and measure.subwin is None:
+            measure.subwin = self.add_mdi_subwin(ui, name, measure.color)
+            win_state = self._pending_win_states.pop(name, None)
+            if win_state is not None:
+                self._restore_win_state(measure.subwin, win_state)
+        return ui
 
     def bring_mdi_subwin_to_front(self, subwin: QtWidgets.QMdiSubWindow) -> None:
         view_mode = self.ui.mdiArea.viewMode()
@@ -876,13 +911,19 @@ class BaseMicroscopeApp(BaseApp):
             if hw.settings["connected"]:
                 hw.read_from_hardware()
 
-    def add_hardware(self, hw: HardwareProtocol) -> HardwareProtocol:
+    def add_hardware(
+        self, hw: HardwareProtocol, initially_hidden: Optional[bool] = None
+    ) -> HardwareProtocol:
         """Loads a HardwareComponent object into the app.
 
         If *hw* is a class, rather an instance, create an instance
         and add it to self.hardware.
 
         Raises ComponentAlreadyExistsError if its name is already registered.
+        and add it to self.hardware
+
+        If *initially_hidden* is True, the hardware is only listed in the tree when
+        "show initially_hidden" is checked.
         """
         # If *hw* is a class, rather an instance, create an instance
         if inspect.isclass(hw):
@@ -894,6 +935,9 @@ class BaseMicroscopeApp(BaseApp):
             raise ComponentAlreadyExistsError(
                 f"Hardware '{hw.name}' already exists. Remove it first with app.remove_hardware('{hw.name}')"
             )
+
+        if initially_hidden is not None:
+            hw.settings["hidden"] = initially_hidden
 
         self.hardware.add(hw.name, hw)
 
@@ -935,18 +979,30 @@ class BaseMicroscopeApp(BaseApp):
         hw.operations.clear_shortcuts()
 
         del self.hardware[name]
-        
+
         self.dynamic_components.removed("hardware", name)
 
         self.log.info(f"Hardware {name} removed")
 
-    def add_measurement(self, measure: MeasurementProtocol) -> MeasurementProtocol:
+    def add_measurement(
+        self,
+        measure: MeasurementProtocol,
+        initially_hidden: Optional[bool] = None,
+        unhide_on_connection: Optional[HardwareProtocol] = None,
+    ) -> MeasurementProtocol:
         """Loads a Measurement object into the app.
 
         If *measure* is a class, rather an instance, create an instance
         and add it to self.measurements.
 
         Raises ComponentAlreadyExistsError if its name is already registered.
+        If *initially_hidden* is True, the measurement's UI is not loaded and it is only
+        listed in the tree when "show hidden" is checked. It can be unhidden
+        with its "hidden" setting. None leaves the setting untouched.
+
+        If *unhide_on_connection* is a hardware component, *initially_hidden* is
+        ignored and the measurement is hidden as long as that hardware is not
+        connected (one-way: changing "hidden" does not affect the hardware).
         """
         # If *measure* is a class, rather an instance, create an instance
         if inspect.isclass(measure):
@@ -959,9 +1015,26 @@ class BaseMicroscopeApp(BaseApp):
                 f"Measurement '{measure.name}' already exists. Remove it first with app.remove_measurement('{measure.name}')"
             )
 
+        if unhide_on_connection is not None:
+            if not isinstance(
+                unhide_on_connection.settings, LQCollection
+            ) or not hasattr(unhide_on_connection, "connected"):
+                raise ValueError(
+                    "unhide_on_connection hardware must have a 'connected' LoggedQuantity"
+                )
+            self.set_measurement_connection_visibility(measure, unhide_on_connection)
+            initially_hidden = not unhide_on_connection.connected.val
+
+        if initially_hidden is not None:
+            measure.settings["hidden"] = initially_hidden
+
         self.measurements.add(measure.name, measure)
 
         self.add_lq_collection_to_settings_path(measure.settings)
+
+        measure.settings.get_lq("hidden").updated_value[bool].connect(
+            partial(self._on_measure_hidden_changed, measure)
+        )
 
         if hasattr(self, "mm_tree"):
             from ScopeFoundry.dynamical_widgets.tree_widget import SubtreeManager
@@ -969,13 +1042,27 @@ class BaseMicroscopeApp(BaseApp):
             SubtreeManager(self.mm_tree, measure)
             measure.operations.set_shortcut_parent(self.ui)
 
-        if self.mdi and hasattr(self, "ui"):
-            ui = self.load_measure_ui(measure)
-            if ui is not None:
-                subwin = self.add_mdi_subwin(ui, measure.name, measure.color)
-                measure.subwin = subwin
+        if self.mdi and hasattr(self, "ui") and not measure.settings["hidden"]:
+            self.load_measure_ui(measure)
 
         return measure
+
+    def set_measurement_connection_visibility(
+        self, measure: MeasurementProtocol, hardware: Optional[HardwareProtocol]
+    ) -> None:
+        """Replace the one-way hardware connection listener on a measurement."""
+        listener = getattr(measure, "_unhide_on_connection_listener", None)
+        if listener is not None:
+            connected_lq, callback = listener
+            connected_lq.updated_value[bool].disconnect(callback)
+            del measure._unhide_on_connection_listener
+        if hardware is not None:
+            connected_lq = hardware.connected
+            hidden_lq = measure.settings.get_lq("hidden")
+            callback = lambda connected, lq=hidden_lq: lq.update_value(not connected)
+            connected_lq.updated_value[bool].connect(callback)
+            measure._unhide_on_connection_listener = (connected_lq, callback)
+            hidden_lq.update_value(not connected_lq.val)
 
     def add_measurement_component(
         self, measure: MeasurementProtocol
@@ -989,6 +1076,8 @@ class BaseMicroscopeApp(BaseApp):
             return
 
         measure = self.measurements[name]
+
+        self.set_measurement_connection_visibility(measure, None)
 
         if measure.is_measuring():
             self.log.info(f"Interrupting {name} before removal")
@@ -1025,6 +1114,8 @@ class BaseMicroscopeApp(BaseApp):
                     ui.deleteLater()
             del self._loaded_measure_uis[name]
 
+        self._measure_menu_actions.pop(name, None)
+        self._pending_win_states.pop(name, None)
         for action in self.ui.menuWindow.actions():
             if action.text() == name:
                 self.ui.menuWindow.removeAction(action)
@@ -1336,19 +1427,22 @@ class BaseMicroscopeApp(BaseApp):
         )
         return self.settings.as_dict()
 
+    @staticmethod
+    def _restore_win_state(subwin: QtWidgets.QMdiSubWindow, win_state) -> None:
+        subwin.showNormal()
+        if win_state.get("fullscreen", False):
+            subwin.showFullScreen()
+        elif win_state.get("maximized", False):
+            subwin.showMaximized()
+        elif win_state.get("minimized", False):
+            subwin.showMinimized()
+        else:
+            subwin.setGeometry(*win_state["geometry"])
+
     def set_window_positions(
         self, positions: Dict[str, Any], adjust_main_window_size: bool = True
     ) -> None:
-        def restore_win_state(subwin: QtWidgets.QMdiSubWindow, win_state):
-            subwin.showNormal()
-            if win_state.get("fullscreen", False):
-                subwin.showFullScreen()
-            elif win_state.get("maximized", False):
-                subwin.showMaximized()
-            elif win_state.get("minimized", False):
-                subwin.showMinimized()
-            else:
-                subwin.setGeometry(*win_state["geometry"])
+        restore_win_state = self._restore_win_state
 
         if not self.mdi:
             main_state = positions.get("main", {})
@@ -1372,7 +1466,13 @@ class BaseMicroscopeApp(BaseApp):
                 mm_name = name.split("/")[-1]
                 if mm_name in self.measurements:
                     M = self.measurements[mm_name]
+                    if M.subwin is None:
+                        # applied once the ui gets loaded
+                        self._pending_win_states[mm_name] = win_state
+                        continue
                     restore_win_state(M.subwin, win_state)
+                    if M.settings["hidden"]:
+                        M.subwin.hide()
 
         subwins = {
             "log": self.logging_subwin,
@@ -1382,7 +1482,9 @@ class BaseMicroscopeApp(BaseApp):
             if name.startswith("measurement/"):
                 mm_name = name.split("/")[-1]
                 if mm_name in self.measurements:
-                    subwins[name] = self.measurements[mm_name].subwin
+                    M = self.measurements[mm_name]
+                    if M.subwin and not M.settings["hidden"]:
+                        subwins[name] = M.subwin
         z_ordered = sorted(
             (n for n in subwins if "z" in positions[n]),
             key=lambda n: positions[n]["z"],
@@ -1435,8 +1537,10 @@ class BaseMicroscopeApp(BaseApp):
         positions["console"] = win_state_from_subwin(self.console_subwin)
 
         for name, M in self.measurements.items():
-            if hasattr(M, "ui"):
+            if M.subwin is not None:
                 positions[f"measurement/{name}"] = win_state_from_subwin(M.subwin)
+            elif name in self._pending_win_states:
+                positions[f"measurement/{name}"] = self._pending_win_states[name]
 
         return positions
 
