@@ -76,8 +76,6 @@ class BaseMicroscopeApp(BaseApp):
     mdi = True
     """Multiple Document Interface flag. Tells the app whether to include an MDI widget in the app."""
     colorize_components = False
-    enable_ipynb_analysis = True
-    """Add the notebook analysis measurement after setup when enabled."""
 
     def __init__(self, argv: List[str] = [], **kwargs: Any) -> None:
 
@@ -104,14 +102,13 @@ class BaseMicroscopeApp(BaseApp):
 
         self.setup()
 
-        ipynb_analysis = None
-        if self.enable_ipynb_analysis:
-            from ScopeFoundry.h5_analyze_with_ipynb.IpynbAnalysisMeasurement import (
-                IpynbAnalysisMeasurement,
-            )
+        # making IpynbAnalysisMeasurement mandatory for now. Will need a more clever idea to opt out.
+        from ScopeFoundry.h5_analyze_with_ipynb.IpynbAnalysisMeasurement import (
+            IpynbAnalysisMeasurement,
+        )
 
-            ipynb_analysis = IpynbAnalysisMeasurement(self)
-            self.add_measurement(ipynb_analysis)
+        ipynb_analysis = IpynbAnalysisMeasurement(self)
+        self.add_measurement(ipynb_analysis, initially_hidden=True)
 
         from .component_picker import DynamicComponents
 
@@ -122,8 +119,7 @@ class BaseMicroscopeApp(BaseApp):
         if self.mdi:
             self._setup_ui_mdi_area()
         self._setup_ui_menu_bar()
-        if ipynb_analysis is not None:
-            ipynb_analysis.install_app_controls(self._app_widget_buttons_layout)
+        ipynb_analysis.install_app_controls(self._app_widget_buttons_layout)
         self.setup_ui()  # child may overrite
         self._register_operation_shortcuts()
         self._post_setup_ui_quickaccess()

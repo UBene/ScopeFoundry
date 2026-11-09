@@ -9,6 +9,7 @@ from qtpy import QtCore, QtTest, QtWidgets
 
 from ScopeFoundry import BaseMicroscopeApp
 from ScopeFoundry import h5_analyze_with_ipynb
+import ScopeFoundry.h5_analyze_with_ipynb.IpynbAnalysisMeasurement as ipynb_measurement
 from ScopeFoundry.h5_analyze_with_ipynb import ipynb_analysis
 from ScopeFoundry.h5_analyze_with_ipynb.IpynbAnalysisMeasurement import (
     IpynbAnalysisMeasurement,
@@ -75,7 +76,7 @@ class AnalyzeNBTest(unittest.TestCase):
         (analysis.app_scripts_path / "existing.py").write_text("new")
         (folder / "existing.py").write_text("original")
         analysis.settings["ipynb_option"] = "all"
-        with patch.object(ipynb_analysis, "open_file") as open_file:
+        with patch.object(ipynb_measurement, "open_file") as open_file:
             notebook = analysis.analyze()
         open_file.assert_called_once_with(notebook)
         content = json.loads(notebook.read_text())
@@ -86,26 +87,27 @@ class AnalyzeNBTest(unittest.TestCase):
         self.assertEqual((folder / "app_helper.py").read_text(), "app")
         self.assertEqual((folder / "existing.py").read_text(), "original")
 
-    def test_flag_set_during_setup_disables_controls(self):
-        class DisabledApp(BaseMicroscopeApp):
+    def test_flag_set_during_setup_does_not_disable_analysis(self):
+        class App(BaseMicroscopeApp):
             mdi = False
 
             def setup(self):
                 self.enable_ipynb_analysis = False
 
-        app = self.make_app(DisabledApp)
-        self.assertNotIn("ipynb_analysis", app.measurements)
-        self.assertNotIn("ipynb_option", app.settings)
-        self.assertFalse((self.root / "py_analysis_scripts").exists())
-        self.assertFalse(
+        app = self.make_app(App)
+        analysis = app.measurements["ipynb_analysis"]
+        self.assertTrue(analysis.settings["hidden"])
+        self.assertIn("ipynb_option", analysis.settings)
+        self.assertTrue((self.root / "py_analysis_scripts").exists())
+        self.assertTrue(
             app.ui.findChildren(QtWidgets.QPushButton, "analyze with ipynb")
         )
-        self.assertNotIn(
+        self.assertIn(
             "analyze with ipynb",
             [action.text() for action in app.ui.menuAdvanced.actions()],
         )
         shortcuts = app.ui.findChildren(QtWidgets.QShortcut)
-        self.assertFalse(any(s.key().toString() == "Ctrl+I" for s in shortcuts))
+        self.assertTrue(any(s.key().toString() == "Ctrl+I" for s in shortcuts))
 
     def test_controls_route_to_measurement_in_both_ui_modes(self):
         for mdi in (True, False):
@@ -118,9 +120,9 @@ class AnalyzeNBTest(unittest.TestCase):
                 app = self.make_app(App)
                 analysis = app.measurements["ipynb_analysis"]
                 operation = analysis.operations.get("analyze with ipynb")
-                with patch.object(ipynb_analysis, "open_file"):
+                with patch.object(ipynb_measurement, "open_file"):
                     with patch.object(
-                        ipynb_analysis, "generate_loaders_py"
+                        ipynb_measurement, "generate_loaders_py"
                     ) as generate:
                         generate.return_value = (Path("loaders.py"), {})
                         button = app.ui.findChild(QtWidgets.QPushButton, operation.name)
@@ -138,7 +140,7 @@ class AnalyzeNBTest(unittest.TestCase):
         app = self.make_app()
         analysis = app.measurements["ipynb_analysis"]
         self.make_data(self.root / "data")
-        with patch.object(ipynb_analysis, "open_file") as open_file:
+        with patch.object(ipynb_measurement, "open_file") as open_file:
             analysis.start()
             deadline = QtCore.QDeadlineTimer(10000)
             while analysis.is_measuring() and not deadline.hasExpired():
