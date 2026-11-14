@@ -20,7 +20,7 @@ ETOL_W_TIMEOUT = f"{ETOL}_with_{TIMEOUT}"
 
 
 class PIDFeedbackLoopDiagram(QtWidgets.QWidget):
-    CANVAS_WIDTH = 1280
+    CANVAS_WIDTH = 1360
     CANVAS_HEIGHT = 200
 
     # Layout parameters (canvas units). Everything else is derived from these.
@@ -33,15 +33,15 @@ class PIDFeedbackLoopDiagram(QtWidgets.QWidget):
     SUM_X, SUM_D = 230, 50  # summing junction: left edge, diameter
     PID_X, PID_W = 325, 225
     PID_LABEL_W = 30
-    PLANT_X, PLANT_W = 595, 375
+    LIMIT_X, LIMIT_W = 570, 190
+    PLANT_X, PLANT_W = 780, 380
     PLANT_INPUT_W = 350
     PLANT_LIMIT_W = 135
     PLANT_LIMIT_LABEL_W = 32
-    SENSOR_W = 350
-    SENSOR_DY = 32  # sensor top relative to the main signal line
-    RETURN_GAP = 16  # feedback line below the sensor
+    SENSOR_W = PLANT_W
+    SENSOR_DY = 40  # gap between the plant and sensor blocks
     OUTPUT_END_X = 1260
-    TAP_DX = 130  # where the sensor taps the output, right of the plant
+    TAP_DX = 40
     ARROW_HEAD_L, ARROW_HEAD_W = 8, 4
 
     def _build_layout(self):
@@ -50,22 +50,23 @@ class PIDFeedbackLoopDiagram(QtWidgets.QWidget):
         pid_h = c.TITLE_H + rows_h + c.PAD
         pid_y = c.MARGIN
         mid = pid_y + pid_h / 2  # main signal line
-        plant_h = c.TITLE_H + 2 * c.ROW_H + c.ROW_GAP + c.PAD
+        plant_h = c.TITLE_H + c.ROW_H + c.PAD
         plant_y = mid - plant_h / 2
+        limits_h = c.TITLE_H + 2 * c.ROW_H + c.ROW_GAP + c.PAD
+        limits_y = mid - limits_h / 2
         plant_right = c.PLANT_X + c.PLANT_W
         tap_x = plant_right + c.TAP_DX
         sensor_h = c.TITLE_H + c.ROW_H + c.PAD
-        sensor_y = mid + c.SENSOR_DY
-        sensor_x = tap_x - c.SENSOR_W / 2
-        return_y = sensor_y + sensor_h + c.RETURN_GAP
-        c.CANVAS_HEIGHT = int(return_y + c.MARGIN)
+        sensor_y = plant_y + plant_h + c.SENSOR_DY
+        sensor_x = c.PLANT_X + (c.PLANT_W - c.SENSOR_W) / 2
+        c.CANVAS_HEIGHT = int(sensor_y + sensor_h + c.MARGIN)
 
         c.mid_y = mid
         c.tap_x = tap_x
-        c.return_y = return_y
         c.sum_cx = c.SUM_X + c.SUM_D / 2
         c.sum_rect = (c.SUM_X, mid - c.SUM_D / 2, c.SUM_D, c.SUM_D)
         c.pid_rect = (c.PID_X, pid_y, c.PID_W, pid_h)
+        c.limits_rect = (c.LIMIT_X, limits_y, c.LIMIT_W, limits_h)
         c.plant_rect = (c.PLANT_X, plant_y, c.PLANT_W, plant_h)
         c.sensor_rect = (sensor_x, sensor_y, c.SENSOR_W, sensor_h)
 
@@ -95,25 +96,35 @@ class PIDFeedbackLoopDiagram(QtWidgets.QWidget):
             y = pid_y + c.TITLE_H + i * (c.ROW_H + c.ROW_GAP)
             c.widget_geometry[name] = (pid_widget_x, y, pid_widget_w, c.ROW_H)
             c.labels.append((name, c.PID_X + 10, y, c.PID_LABEL_W, c.ROW_H))
-        limits_y = plant_y + c.TITLE_H + c.ROW_H + c.ROW_GAP
-        min_label_x = c.PLANT_X + c.PAD
+        limits_row_y = limits_y + c.TITLE_H
+        min_label_x = c.LIMIT_X + c.PAD
         min_x = min_label_x + c.PLANT_LIMIT_LABEL_W + 3
-        max_x = plant_right - c.PAD - c.PLANT_LIMIT_W
-        max_label_x = max_x - 3 - c.PLANT_LIMIT_LABEL_W
+        max_label_x = min_label_x
+        max_x = min_x
         c.widget_geometry["min_plant_input"] = (
             min_x,
-            limits_y,
+            limits_row_y,
             c.PLANT_LIMIT_W,
             c.ROW_H,
         )
         c.widget_geometry["max_plant_input"] = (
             max_x,
-            limits_y,
+            limits_row_y + c.ROW_H + c.ROW_GAP,
             c.PLANT_LIMIT_W,
             c.ROW_H,
         )
-        c.labels.append(("Min", min_label_x, limits_y, c.PLANT_LIMIT_LABEL_W, c.ROW_H))
-        c.labels.append(("Max", max_label_x, limits_y, c.PLANT_LIMIT_LABEL_W, c.ROW_H))
+        c.labels.append(
+            ("Min", min_label_x, limits_row_y, c.PLANT_LIMIT_LABEL_W, c.ROW_H)
+        )
+        c.labels.append(
+            (
+                "Max",
+                max_label_x,
+                limits_row_y + c.ROW_H + c.ROW_GAP,
+                c.PLANT_LIMIT_LABEL_W,
+                c.ROW_H,
+            )
+        )
 
     def __init__(self, widgets):
         super().__init__()
@@ -121,6 +132,9 @@ class PIDFeedbackLoopDiagram(QtWidgets.QWidget):
         self.setMinimumHeight(self.CANVAS_HEIGHT - 20)
         self.setMaximumHeight(self.CANVAS_HEIGHT + 10)
         self.widgets = widgets
+        setpoint_widget = self.widgets.get("setpoint")
+        setpoint_widget.setStyleSheet("font-size: 12px")
+        setpoint_widget.setMinimumHeight(22)
         for widget in self.widgets.values():
             widget.setParent(self)
         self._position_widgets()
@@ -200,14 +214,16 @@ class PIDFeedbackLoopDiagram(QtWidgets.QWidget):
         mid = self.mid_y
         sum_x, sum_y, sum_w, sum_h = self.sum_rect
         pid_x, _, pid_w, _ = self.pid_rect
+        limits_x, _, limits_w, _ = self.limits_rect
         plant_x, _, plant_w, _ = self.plant_rect
         sensor_x, sensor_y, sensor_w, sensor_h = self.sensor_rect
         setpoint_x, _, setpoint_w, _ = self.widget_geometry["setpoint"]
 
         label("Setpoint", *self.setpoint_label_rect)
         painter.drawEllipse(QtCore.QRectF(*self.sum_rect))
-        label("Σ", *self.sum_rect)
+        label("+", *self.sum_rect)
         draw_block(*self.pid_rect, "PID Controller")
+        draw_block(*self.limits_rect, "Input Limits")
         draw_block(*self.plant_rect, "Plant")
         draw_block(*self.sensor_rect, "Sensor")
         for text, x, y, w, h in self.labels:
@@ -217,20 +233,21 @@ class PIDFeedbackLoopDiagram(QtWidgets.QWidget):
         # forward path
         draw_arrow(point(setpoint_x + setpoint_w, mid), point(sum_x, mid))
         draw_arrow(point(sum_x + sum_w, mid), point(pid_x, mid))
-        draw_arrow(point(pid_x + pid_w, mid), point(plant_x, mid))
+        draw_arrow(point(pid_x + pid_w, mid), point(limits_x, mid))
+        draw_arrow(point(limits_x + limits_w, mid), point(plant_x, mid))
         draw_arrow(point(plant_x + plant_w, mid), point(self.OUTPUT_END_X, mid))
 
         # feedback path: tap on the output -> sensor -> back to the junction
-        tap_x, return_y = self.tap_x, self.return_y
+        tap_x = self.tap_x
         painter.setBrush(foreground)
         painter.drawEllipse(point(tap_x, mid), 3, 3)
         painter.setBrush(background)
-        draw_arrow(point(tap_x, mid), point(tap_x, sensor_y))
-        sensor_bottom = sensor_y + sensor_h
-        painter.drawLine(point(tap_x, sensor_bottom), point(tap_x, return_y))
-        painter.drawLine(point(tap_x, return_y), point(self.sum_cx, return_y))
-        draw_arrow(point(self.sum_cx, return_y), point(self.sum_cx, sum_y + sum_h))
-        label("−", self.sum_cx + 4, sum_y + sum_h + 2, 16, 16)
+        sensor_mid = sensor_y + sensor_h / 2
+        painter.drawLine(point(tap_x, mid), point(tap_x, sensor_mid))
+        draw_arrow(point(tap_x, sensor_mid), point(sensor_x + sensor_w, sensor_mid))
+        painter.drawLine(point(sensor_x, sensor_mid), point(self.sum_cx, sensor_mid))
+        draw_arrow(point(self.sum_cx, sensor_mid), point(self.sum_cx, sum_y + sum_h))
+        label("-", self.sum_cx + 4, sum_y + sum_h + 2, 16, 16)
 
         painter.end()
         event.accept()
@@ -267,38 +284,54 @@ class PIDFeedbackControl(Measurement):
             vmin=0.0,
             initial=10.0,
             unit="s",
-            description=f"used to define <b>terminate</b> condition <i>{TIMEOUT}</i> and <i>{ETOL_W_TIMEOUT}</i>, ignored otherwise",
+            description=f"The measurement ends after a fixed time.\nUsed to define the <b>terminate</b> conditions <i>{TIMEOUT}</i> and <i>{ETOL_W_TIMEOUT}</i>; ignored otherwise.",
         )
-        s.New("error", float, initial=1_000, unit="%", ro=True)
+        s.New(
+            "error",
+            float,
+            initial=1_000,
+            unit="%",
+            ro=True,
+            description="Current relativeerror value",
+        ),
         s.New(
             "error_tol",
             float,
             vmin=0.0,
             initial=1.0,
             unit="%",
-            description=f"used to define <b>terminate</b> condition <i>{ETOL}</i> and <i>{ETOL_W_TIMEOUT}</i>, ignored otherwise",
+            description=f"Relative error tolerance used to define <b>terminate</b> condition <i>{ETOL}</i> and <i>{ETOL_W_TIMEOUT}</i>, ignored otherwise",
+        )
+        s.New(
+            "window",
+            float,
+            vmin=0.0,
+            initial=1.0,
+            unit="s",
+            description=f"The measurement terminates when the error is strictly below the specified <b>error_tol</b> for the specified window of time. Used for terminate conditions <i>{ETOL}</i> and <i>{ETOL_W_TIMEOUT}</i>. ",
         )
         s.New(
             "terminate",
             str,
             initial=ETOL_W_TIMEOUT,
-            choices=(TIMEOUT, INDEF, ETOL_W_TIMEOUT, ETOL),
-            description=f"condition for {self.name} to end.",
+            choices=(TIMEOUT, INDEF, ETOL, ETOL_W_TIMEOUT),
+            description=f"Condition under which {self.name} ends. Choices: \n\n<i>{TIMEOUT}</i>: measurement ends after a fixed time \n\n<i>{INDEF}</i>: measurement ends only when manually stopped \n\n<i>{ETOL}</i>: measurement ends when the error is below the specified <b>error_tol</b> for the specified <b>window of time</b> \n\n<i>{ETOL_W_TIMEOUT}</i>:  {ETOL} or {TIMEOUT}, whichever occurs first.",
         )
         s.New(
             "min_plant_input",
             float,
             initial=-1e-99,
             si=True,
-            description=f"minimum plant input value.",
+            description="An extra layer to enforce a minimum plant input value to protect your system.",
         )
         s.New(
             "max_plant_input",
             float,
             initial=1e-99,
             si=True,
-            description=f"maximum plant input value.",
+            description="An extra layer to enforce a maximum plant input value to protect your system.",
         )
+
         s.New("save_h5", bool, initial=False)
         self.data = mk_data_dict(600, 1.0)
 
@@ -320,28 +353,69 @@ class PIDFeedbackControl(Measurement):
         }
         diagram_widget = PIDFeedbackLoopDiagram(diagram_widgets)
 
-        terminate_widget = self.settings.New_UI(("terminate", "timeout", "error_tol"))
-
         btn_layout = QtWidgets.QVBoxLayout()
-        btn_layout.addWidget(self.new_start_stop_button())
+        filter_btn_layout = QtWidgets.QHBoxLayout()
+        btn_layout.addLayout(filter_btn_layout)
         op_button = QtWidgets.QPushButton("unfilter options")
         op_button.clicked.connect(self.update_choices)
-        btn_layout.addWidget(op_button)
+        filter_btn_layout.addWidget(op_button)
         op_button = QtWidgets.QPushButton("filter options to available")
         op_button.setToolTip("only settings that are connected to hardware")
         op_button.clicked.connect(self.update_choices_filtered)
-        btn_layout.addWidget(op_button)
+        filter_btn_layout.addWidget(op_button)
+        w = self.settings.get_lq("save_h5").new_default_widget()
+        w.setMaximumWidth(25)
+        filter_btn_layout.addWidget(w)
+        filter_btn_layout.addWidget(QtWidgets.QLabel("save_h5"))
+        btn_layout.addWidget(self.new_start_stop_button())
+
+        MAX_WIDTH = 90
+        terminate_group = QtWidgets.QGroupBox("Measurement Termination")
+        terminate_layout = QtWidgets.QGridLayout()
+        terminate_group.setLayout(terminate_layout)
+        label = QtWidgets.QLabel("Conditions")
+        label.setMaximumWidth(MAX_WIDTH)
+        terminate_layout.addWidget(label, 0, 0)
+        terminate_layout.addWidget(
+            self.settings.get_lq("terminate").new_default_widget(), 0, 1, 1, 3
+        )
+        self.timeout_widget = QtWidgets.QWidget()
+        self.timeout_layout = QtWidgets.QHBoxLayout(self.timeout_widget)
+        label = QtWidgets.QLabel("Timeout:")
+        label.setMaximumWidth(MAX_WIDTH)
+        self.timeout_layout.addWidget(label)
+        self.timeout_layout.addWidget(
+            self.settings.get_lq("timeout").new_default_widget()
+        )
+        terminate_layout.addWidget(self.timeout_widget, 1, 0, 1, 4)
+
+        self.tolarence_widget = QtWidgets.QWidget()
+        self.tolarence_layout = QtWidgets.QHBoxLayout(self.tolarence_widget)
+        label = QtWidgets.QLabel("Error Tolerance:")
+        label.setMaximumWidth(MAX_WIDTH)
+        self.tolarence_layout.addWidget(label)
+        self.tolarence_layout.addWidget(
+            self.settings.get_lq("error_tol").new_default_widget()
+        )
+
+        label = QtWidgets.QLabel("Window:")
+        label.setMaximumWidth(MAX_WIDTH)
+        self.tolarence_layout.addWidget(label)
+        self.tolarence_layout.addWidget(
+            self.settings.get_lq("window").new_default_widget()
+        )
+        terminate_layout.addWidget(self.tolarence_widget, 2, 0, 1, 4)
 
         r_layout = QtWidgets.QHBoxLayout()
         r_layout.addLayout(btn_layout)
-        r_layout.addWidget(terminate_widget)
+        r_layout.addWidget(terminate_group)
 
         header_layout = QtWidgets.QVBoxLayout()
         header_layout.addWidget(diagram_widget)
         header_layout.addLayout(r_layout)
 
         graph_widget = pg.GraphicsLayoutWidget(border=(0, 0, 0))
-        axes = graph_widget.addPlot(title=self.name)
+        self.axes = axes = graph_widget.addPlot(title=self.name)
         t = self.data["lab_times"]
         self.sensor_values_plotline = axes.plot(t, self.data["sensor_values"], pen="w")
         self.setpoints_plotline = axes.plot(t, self.data["setpoints"], pen="y")
@@ -351,6 +425,14 @@ class PIDFeedbackControl(Measurement):
         self.layout.addLayout(header_layout)
         self.layout.addWidget(graph_widget)
         self.update_choices()
+
+        self.settings.get_lq("terminate").add_listener(
+            self.on_update_terminate_conditions
+        )
+
+    def on_update_terminate_conditions(self):
+        self.timeout_widget.setVisible(TIMEOUT in self.settings["terminate"])
+        self.tolarence_widget.setVisible(ETOL in self.settings["terminate"])
 
     def run(self):
         from simple_pid.pid import (
@@ -372,7 +454,7 @@ class PIDFeedbackControl(Measurement):
         )
 
         ii = 0
-        wrap_around = 600
+        wrap_around = 1_000
         self.data = mk_data_dict(wrap_around, s["setpoint"])
         t0 = time.time()
         lab_time = 0
@@ -385,11 +467,13 @@ class PIDFeedbackControl(Measurement):
                 pid(sensor_value), s["min_plant_input"], s["max_plant_input"]
             )
             self.app.get_lq(s["plant_input"]).update_value(plant_input)
-            s["error"] = 100.0 * (1 - sensor_value / s["setpoint"])
+            err = 100.0 * (1 - sensor_value / s["setpoint"])
+            s["error"] = err
             lab_time = time.time() - t0
 
             self.data["setpoints"][ii] = s["setpoint"]
             self.data["sensor_values"][ii] = sensor_value
+            self.data["errors"][ii] = err
             self.data["lab_times"][ii] = lab_time
 
             if self.should_terminate(lab_time):
@@ -401,6 +485,29 @@ class PIDFeedbackControl(Measurement):
         if s["save_h5"]:
             self.save_h5()
 
+    def considered_in_tolerance(self):
+
+        last_time = (
+            numpy.nanmax(self.data["lab_times"])
+            if numpy.any(~numpy.isnan(self.data["lab_times"]))
+            else 0
+        )
+        if last_time <= 1:
+            return False
+
+        mask = ~numpy.isnan(self.data["errors"]) & (
+            self.data["lab_times"] > last_time - self.settings["window"]
+        )
+
+        errors_in_window = self.data["errors"][mask]
+        if errors_in_window.size == 0:
+            return False
+
+        if numpy.all(numpy.abs(errors_in_window) <= self.settings["error_tol"]):
+            return True
+        else:
+            return False
+
     def should_terminate(self, lab_time):
         s = self.settings
         if s["terminate"] == INDEF:
@@ -410,10 +517,10 @@ class PIDFeedbackControl(Measurement):
             return lab_time >= s["timeout"]
         if s["terminate"] == ETOL:
             self.set_progress(100.0 * s["error_tol"] / abs(s["error"]))
-            return abs(s["error"]) <= s["error_tol"]
+            return self.considered_in_tolerance()
         if s["terminate"] == ETOL_W_TIMEOUT:
             self.set_progress(100.0 * lab_time / s["timeout"])
-            return lab_time >= s["timeout"] or abs(s["error"]) <= s["error_tol"]
+            return lab_time >= s["timeout"] or self.considered_in_tolerance()
 
     def update_display(self):
         t = self.data["lab_times"]
@@ -422,6 +529,7 @@ class PIDFeedbackControl(Measurement):
             t[indices], self.data["sensor_values"][indices]
         )
         self.setpoints_plotline.setData(t[indices], self.data["setpoints"][indices])
+        self.axes.setTitle(f"error  {self.settings['error']:.2f} %")
 
     def update_choices(self):
         s = self.settings
@@ -465,6 +573,9 @@ class PIDFeedbackControl(Measurement):
             group[k] = v
         h5_file.close()
 
+    def get_py_snippet(self):
+        return """setpoints = data['setpoints']; sensor_values = data['sensor_values']; lab_times = data['lab_times']; errors = data['errors']"""
+
 
 def apply_min_max(value, min_value, max_value):
     return min(max(value, min_value), max_value)
@@ -475,6 +586,7 @@ def mk_data_dict(N, setpoint):
         "setpoints": numpy.ones(N) * setpoint,
         "sensor_values": numpy.ones(N) * numpy.nan,
         "lab_times": numpy.arange(N),
+        "errors": numpy.ones(N) * numpy.nan,
     }
 
 
