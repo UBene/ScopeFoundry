@@ -894,6 +894,7 @@ class BaseMicroscopeApp(BaseApp):
     def on_close(self) -> None:
         self.log.info("on_close")
         self.profile_manager.history.save_snapshot("Application closing")
+        self.profile_manager.history.trim_history_dir()
         for hw in self.hardware.values():
             self.log.info(f"disconnecting {hw.name}")
             try:

@@ -216,3 +216,10 @@ class StateHistory:
             self._restoring = False
         self._cursor = entry_name
         self.refresh_menu()
+
+    def trim_history_dir(self) -> None:
+        max_history = self.max_entries
+        entries = sorted(self.history_dir.iterdir(), key=lambda p: p.name)
+        for i, entry_dir in enumerate(entries):
+            if i < len(entries) - max_history:
+                shutil.rmtree(entry_dir)
